@@ -1,0 +1,167 @@
+import os
+import shutil
+import tempfile
+from typing import Optional
+import pandas as pd
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+from agents.data_agent import DataAgent
+from agents.eda_agent import EDAAgent
+from agents.sql_agent import SQLAgent
+from agents.ml_agent import MLAgent
+
+load_dotenv()
+
+app = FastAPI(
+    title="AgentInsight AI Backend",
+    description="Multi-agent AI Business Intelligence Platform - Data Ingestion & Preprocessing",
+    version="0.1.0",
+)
+
+# Configure CORS to permit requests from Vite default dev server
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+data_agent = DataAgent()
+eda_agent = EDAAgent()
+sql_agent = SQLAgent()
+ml_agent = MLAgent()
+
+# In-memory session store for cleaned DataFrame and quality report
+current_cleaned_df: Optional[pd.DataFrame] = None
+current_quality_report: Optional[dict] = None
+
+
+class QueryRequest(BaseModel):
+    question: str
+
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint to verify backend connectivity."""
+    return {"status": "ok"}
+
+
+@app.post("/api/query")
+async def run_sql_query(request: QueryRequest):
+    """Executes a natural language business question by translating it to a safe SQLite query,
+    running it on the validated subset of current dataset, and returning results with retry handling.
+    """
+    global current_cleaned_df, current_quality_report
+    if current_cleaned_df is None or current_cleaned_df.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="No cleaned dataset found in session. Please upload a dataset first via POST /api/upload.",
+        )
+    try:
+        return sql_agent.generate_and_run(
+            question=request.question,
+            df=current_cleaned_df,
+            quality_report=current_quality_report,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to process natural language query: {str(exc)}",
+        )
+
+
+@app.post("/api/eda")
+async def run_exploratory_analysis():
+    """Runs the EDAAgent on the already-cleaned dataset from the previous upload."""
+    global current_cleaned_df, current_quality_report
+    if current_cleaned_df is None or current_cleaned_df.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="No cleaned dataset found in session. Please upload a dataset first via POST /api/upload.",
+        )
+    try:
+        return eda_agent.analyze(current_cleaned_df, quality_report=current_quality_report)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to generate exploratory analysis: {str(exc)}",
+        )
+
+
+@app.post("/api/ml-insights")
+async def run_ml_insights():
+    """Runs the MLAgent to perform unsupervised anomaly detection (IsolationForest)
+    and trend forecasting with honest data-sufficiency confidence evaluations.
+    """
+    global current_cleaned_df, current_quality_report
+    if current_cleaned_df is None or current_cleaned_df.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="No cleaned dataset found in session. Please upload a dataset first via POST /api/upload.",
+        )
+    try:
+        return ml_agent.analyze(current_cleaned_df, quality_report=current_quality_report)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to generate machine learning insights: {str(exc)}",
+        )
+
+
+@app.post("/api/upload")
+async def upload_dataset(file: UploadFile = File(...)):
+    """Accepts a CSV or Excel dataset, validates and cleans the data using DataAgent,
+    and returns a summary, column details, and preview.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file selected for upload.")
+
+    _, ext = os.path.splitext(file.filename.lower())
+    if ext not in [".csv", ".xlsx", ".xls"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file format '{ext}'. Only .csv, .xlsx, or .xls files are accepted.",
+        )
+
+    # Save to a temporary file safely
+    temp_dir = tempfile.mkdtemp(prefix="agentinsight_")
+    temp_file_path = os.path.join(temp_dir, file.filename)
+
+    try:
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Process through the Data Agent
+        result = data_agent.process(temp_file_path)
+
+        # Store cleaned DataFrame and quality report in session memory for EDA
+        global current_cleaned_df, current_quality_report
+        current_cleaned_df = data_agent.last_cleaned_df
+        current_quality_report = result.get("data_quality_report")
+
+        return result
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to process dataset '{file.filename}': {str(exc)}",
+        )
+    finally:
+        # Clean up temporary storage
+        try:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
