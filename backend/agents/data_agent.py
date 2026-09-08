@@ -406,17 +406,183 @@ class DataAgent:
 
         # =====================================================================
         # 7. MISSING VALUE IMPUTATION (ONLY ON TRUE NULLS, NOT FLAGGED CELLS)
+        #
+        # Strategy overview:
+        #  Numeric cols that vary by category (e.g. unit_price):
+        #    → Fill using the median WITHIN the same product category (high confidence)
+        #    → Fall back to overall median if category is also unknown (low confidence)
+        #  Category col that is tightly coupled to price (e.g. product):
+        #    → Infer from price proximity to each category's median (high confidence)
+        #    → Fall back to "Unknown" — never blind-mode-fill a specific product name
+        #  All other numerics: overall median (standard)
+        #  All other categoricals: mode if low-cardinality, else "Unknown"
         # =====================================================================
         columns_info: List[Dict[str, Any]] = []
 
+        # Detect structural columns used for category-aware imputation
+        cat_col_name: Optional[str] = next(
+            (
+                str(c)
+                for c in df.columns
+                if any(kw in str(c).lower() for kw in ["product", "category", "item"])
+            ),
+            None,
+        )
+        price_col_name: Optional[str] = next(
+            (
+                str(c)
+                for c in df.columns
+                if any(kw in str(c).lower() for kw in ["unit_price", "price"])
+            ),
+            None,
+        )
+
+        # Pre-compute per-category price medians for inference (only if both cols exist)
+        cat_price_medians: Dict[str, float] = {}
+        overall_price_median: Optional[float] = None
+        if cat_col_name and price_col_name:
+            price_num = pd.to_numeric(df[price_col_name], errors="coerce")
+            overall_price_median = float(price_num.median()) if price_num.notna().any() else None
+            cat_price_medians = (
+                df.groupby(df[cat_col_name])[price_col_name]
+                .apply(lambda s: pd.to_numeric(s, errors="coerce").median())
+                .dropna()
+                .to_dict()
+            )
+            # Cast keys to str for consistent lookup
+            cat_price_medians = {str(k): float(v) for k, v in cat_price_medians.items()}
+
+        # Pre-compute per-category medians for all numeric columns
+        #   { col_str -> { category_value -> median } }
+        cat_numeric_medians: Dict[str, Dict[str, float]] = {}
+        if cat_col_name:
+            for col in df.columns:
+                col_str = str(col)
+                if col_str == cat_col_name:
+                    continue
+                if pd.api.types.is_numeric_dtype(df[col]) or self._is_numeric_target_column(col_str, df[col]):
+                    grp_medians = (
+                        df.groupby(df[cat_col_name])[col]
+                        .apply(lambda s: pd.to_numeric(s, errors="coerce").median())
+                        .dropna()
+                        .to_dict()
+                    )
+                    cat_numeric_medians[col_str] = {str(k): float(v) for k, v in grp_medians.items()}
+
+        # ---- Pass 1: product/category column — infer from price if available ----
+        if cat_col_name and cat_col_name in [str(c) for c in df.columns]:
+            true_null_cat_indices = [
+                idx
+                for idx in range(rows_after_dedup)
+                if pd.isna(df.at[idx, cat_col_name]) and (idx, cat_col_name) not in flagged_cells
+            ]
+
+            if true_null_cat_indices:
+                imputed_cat_count = 0
+                for idx in true_null_cat_indices:
+                    # Try to infer product from unit_price proximity
+                    inferred = None
+                    confidence_tag = None
+                    if price_col_name and cat_price_medians:
+                        row_price = pd.to_numeric(df.at[idx, price_col_name], errors="coerce")
+                        if pd.notna(row_price) and row_price > 0:
+                            # Pick the category whose median price is closest
+                            closest_cat = min(
+                                cat_price_medians,
+                                key=lambda c: abs(cat_price_medians[c] - float(row_price)),
+                            )
+                            inferred = closest_cat
+                            confidence_tag = "high"
+                            flagged_for_review.append(
+                                {
+                                    "row_index": int(idx) + 1,
+                                    "column": cat_col_name,
+                                    "original_value": None,
+                                    "reason": (
+                                        f"Missing '{cat_col_name}' inferred as '{closest_cat}' "
+                                        f"from price similarity (row price ${float(row_price):,.2f} ~= "
+                                        f"'{closest_cat}' median ${cat_price_medians[closest_cat]:,.2f}). "
+                                        f"[imputation confidence: high — price-matched]"
+                                    ),
+                                }
+                            )
+                        else:
+                            # Price also missing — fill as Unknown, do NOT mode-fill
+                            inferred = "Unknown"
+                            confidence_tag = "low"
+                            flagged_for_review.append(
+                                {
+                                    "row_index": int(idx) + 1,
+                                    "column": cat_col_name,
+                                    "original_value": None,
+                                    "reason": (
+                                        f"Missing '{cat_col_name}' filled with 'Unknown' — "
+                                        f"price also unavailable so product identity cannot be inferred. "
+                                        f"[imputation confidence: low — category unknown]"
+                                    ),
+                                }
+                            )
+                    else:
+                        inferred = "Unknown"
+                        confidence_tag = "low"
+
+                    df.at[idx, cat_col_name] = inferred
+                    imputed_cat_count += 1
+
+                auto_fixed_counts["missing_values_imputed"] += imputed_cat_count
+
+                # Rebuild per-category medians after filling product so subsequent
+                # numeric passes can use the newly assigned categories
+                if cat_price_medians and price_col_name:
+                    grp_update = (
+                        df.groupby(df[cat_col_name])[price_col_name]
+                        .apply(lambda s: pd.to_numeric(s, errors="coerce").median())
+                        .dropna()
+                        .to_dict()
+                    )
+                    cat_price_medians = {str(k): float(v) for k, v in grp_update.items()}
+                    for col in df.columns:
+                        col_str = str(col)
+                        if col_str == cat_col_name:
+                            continue
+                        if pd.api.types.is_numeric_dtype(df[col]) or self._is_numeric_target_column(col_str, df[col]):
+                            grp_medians = (
+                                df.groupby(df[cat_col_name])[col]
+                                .apply(lambda s: pd.to_numeric(s, errors="coerce").median())
+                                .dropna()
+                                .to_dict()
+                            )
+                            cat_numeric_medians[col_str] = {str(k): float(v) for k, v in grp_medians.items()}
+
+        # ---- Pass 2: all other columns ----
         for col in df.columns:
             col_str = str(col)
+
+            # Already handled above
+            if col_str == cat_col_name:
+                missing_count = initial_missing_stats[col_str]["missing_count"]
+                missing_pct = initial_missing_stats[col_str]["missing_pct"]
+                true_null_count = sum(
+                    1 for idx in range(rows_after_dedup)
+                    if pd.isna(df.at[idx, col_str]) and (idx, col_str) not in flagged_cells
+                )
+                strat = "price-proximity inference or 'Unknown' (no mode-fill)" if true_null_count == 0 else "none"
+                columns_info.append(
+                    {
+                        "name": col_str,
+                        "dtype": str(df[col].dtype),
+                        "missing_pct": missing_pct,
+                        "missing_count": missing_count,
+                        "imputation_strategy": strat,
+                    }
+                )
+                continue
+
             missing_count = initial_missing_stats[col_str]["missing_count"]
             missing_pct = initial_missing_stats[col_str]["missing_pct"]
-
             imputation_strategy = "none"
 
-            # Eligible true null indices are null cells NOT in flagged_cells
+            # Eligible true null indices
             true_null_indices = [
                 idx
                 for idx in range(rows_after_dedup)
@@ -427,33 +593,74 @@ class DataAgent:
                 is_num = pd.api.types.is_numeric_dtype(df[col]) or self._is_numeric_target_column(col_str, df[col])
                 if is_num:
                     numeric_series = pd.to_numeric(df[col], errors="coerce")
-                    median_val = numeric_series.median()
+                    overall_median = numeric_series.median()
                     valid_nums = numeric_series.dropna().replace([np.inf, -np.inf], np.nan).dropna()
                     is_integer_col = (
                         pd.api.types.is_integer_dtype(df[col])
                         or (len(valid_nums) > 0 and (valid_nums == valid_nums.round()).all())
                     )
 
-                    if pd.isna(median_val):
-                        fill_val = 0
-                    elif is_integer_col:
-                        fill_val = int(round(median_val))
-                    else:
-                        fill_val = float(median_val)
+                    per_cat_medians = cat_numeric_medians.get(col_str, {})
 
                     for idx in true_null_indices:
+                        # Determine which category this row belongs to
+                        row_cat: Optional[str] = None
+                        if cat_col_name:
+                            raw_cat = df.at[idx, cat_col_name]
+                            if pd.notna(raw_cat) and str(raw_cat) != "Unknown":
+                                row_cat = str(raw_cat)
+
+                        if row_cat and row_cat in per_cat_medians:
+                            # Category-aware fill (high confidence)
+                            cat_med = per_cat_medians[row_cat]
+                            fill_val = int(round(cat_med)) if is_integer_col else float(cat_med)
+                            confidence = "high"
+                            imputation_note = (
+                                f"[imputation confidence: high — filled using '{row_cat}' category median "
+                                f"${cat_med:,.2f}]"
+                            )
+                        else:
+                            # Fallback to overall median (low confidence)
+                            if pd.isna(overall_median):
+                                fill_val = 0
+                            elif is_integer_col:
+                                fill_val = int(round(float(overall_median)))
+                            else:
+                                fill_val = float(overall_median)
+                            confidence = "low"
+                            imputation_note = (
+                                f"[imputation confidence: low — category unknown, "
+                                f"used overall column median ${float(overall_median):,.2f}]"
+                            )
+
                         df.at[idx, col] = fill_val
+                        flagged_for_review.append(
+                            {
+                                "row_index": int(idx) + 1,
+                                "column": col_str,
+                                "original_value": None,
+                                "reason": (
+                                    f"Missing value in '{col_str}' imputed with {fill_val}. "
+                                    + imputation_note
+                                ),
+                            }
+                        )
 
                     auto_fixed_counts["missing_values_imputed"] += len(true_null_indices)
-                    imputation_strategy = "median"
+                    has_cat = any(row_cat and row_cat in per_cat_medians for idx in true_null_indices
+                                  for row_cat in [str(df.at[idx, cat_col_name]) if cat_col_name and pd.notna(df.at[idx, cat_col_name]) else None]
+                                  if row_cat)
+                    imputation_strategy = (
+                        "category-median (high confidence)" if has_cat else "overall-median (low confidence — category unknown)"
+                    )
 
-                    # Convert column to clean numeric or int if all values are non-null and not flagged
+                    # Cast column to clean numeric dtype
                     has_flagged = any((i, col_str) in flagged_cells for i in range(rows_after_dedup))
                     if not has_flagged:
                         if is_integer_col:
-                            df[col] = df[col].astype("int64")
+                            df[col] = pd.to_numeric(df[col], errors="coerce").round().astype("int64")
                         else:
-                            df[col] = df[col].astype("float64")
+                            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
                 else:
                     # Categorical / string imputation
                     if self._is_high_cardinality_or_identifier(df[col], col_str):
@@ -469,7 +676,7 @@ class DataAgent:
 
                     auto_fixed_counts["missing_values_imputed"] += len(true_null_indices)
             else:
-                # Still check if we can cleanly cast unflagged numeric columns to int64/float64
+                # No missing values — still try to cast unflagged numeric columns cleanly
                 if pd.api.types.is_numeric_dtype(df[col]) or self._is_numeric_target_column(col_str, df[col]):
                     has_flagged = any((i, col_str) in flagged_cells for i in range(rows_after_dedup))
                     if not has_flagged and df[col].notna().all():
@@ -488,6 +695,7 @@ class DataAgent:
                     "imputation_strategy": imputation_strategy,
                 }
             )
+
 
         cleaned_rows = int(len(df))
         cleaned_cols = int(len(df.columns))
