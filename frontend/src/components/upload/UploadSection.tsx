@@ -59,27 +59,27 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
   }
 
   return (
-    <div className="w-full space-y-4">
+    <div className="w-full space-y-5">
       {activeFileName && (
-        <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
+        <div className="p-4 bg-[#121626]/60 backdrop-blur-xl border border-white/10 rounded-xl shadow-xl shadow-black/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/25 text-indigo-400 flex items-center justify-center font-bold text-lg shadow-inner">
               📄
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-900 text-sm">{activeFileName}</span>
-                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="font-semibold text-white text-sm tracking-tight">{activeFileName}</span>
+                <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
                   Active Dataset
                 </span>
               </div>
-              <span className="text-xs text-slate-500">Ready for data quality inspection and exploratory analysis</span>
+              <span className="text-xs text-zinc-400">Ready for data quality inspection and exploratory analysis</span>
             </div>
           </div>
           {onReset && (
             <button
               onClick={onReset}
-              className="px-3.5 py-1.5 text-xs font-medium rounded-lg text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-colors"
+              className="px-3.5 py-1.5 text-xs font-medium rounded-lg text-zinc-300 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors cursor-pointer"
             >
               Upload Different File
             </button>
@@ -92,12 +92,12 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => !disabled && fileInputRef.current?.click()}
-        className={`group relative flex flex-col items-center justify-center p-8 sm:p-12 border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-200 ${
+        className={`group relative flex flex-col items-center justify-center p-8 sm:p-14 border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-300 backdrop-blur-xl shadow-2xl ${
           disabled
-            ? 'opacity-60 cursor-not-allowed border-slate-200 bg-slate-50'
+            ? 'opacity-50 cursor-not-allowed border-white/10 bg-white/5'
             : isDragOver
-            ? 'border-indigo-600 bg-indigo-50/50 shadow-md scale-[1.005]'
-            : 'border-slate-300 hover:border-indigo-600 bg-white hover:bg-slate-50/60 shadow-sm'
+            ? 'border-indigo-500 bg-indigo-500/12 shadow-indigo-500/20 scale-[1.008]'
+            : 'border-white/15 hover:border-indigo-500/60 bg-[#121626]/40 hover:bg-[#161a30]/60 shadow-black/30'
         }`}
       >
         <input
@@ -110,9 +110,9 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
           id="file-upload-input"
         />
 
-        {/* Upload Icon */}
-        <div className="relative mb-4">
-          <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 group-hover:scale-110 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-200 shadow-sm">
+        {/* Floating Upload Icon */}
+        <div className="relative mb-5">
+          <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 group-hover:scale-110 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300 shadow-lg shadow-indigo-500/20">
             <svg
               className="w-8 h-8"
               fill="none"
@@ -127,36 +127,36 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
               />
             </svg>
           </div>
-          <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shadow-md">
+          <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-indigo-500 text-white flex items-center justify-center text-xs font-bold shadow-md shadow-indigo-500/40">
             +
           </div>
         </div>
 
-        <h3 className="text-base sm:text-lg font-semibold text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors">
+        <h3 className="text-base sm:text-lg font-semibold text-white mb-1.5 group-hover:text-indigo-400 transition-colors tracking-tight">
           Upload Dataset for Multi-Agent BI
         </h3>
-        <p className="text-xs sm:text-sm text-slate-600 text-center max-w-sm mb-4">
+        <p className="text-xs sm:text-sm text-zinc-400 text-center max-w-sm mb-5 leading-relaxed">
           Drag & drop your CSV or Excel spreadsheet here, or click to browse files
         </p>
 
         {/* Supported Formats */}
         <div className="flex items-center gap-2">
-          <span className="px-2.5 py-1 text-xs font-mono font-medium rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+          <span className="px-2.5 py-1 text-xs font-mono font-medium rounded-md bg-white/5 text-zinc-400 border border-white/10">
             .CSV
           </span>
-          <span className="px-2.5 py-1 text-xs font-mono font-medium rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+          <span className="px-2.5 py-1 text-xs font-mono font-medium rounded-md bg-white/5 text-zinc-400 border border-white/10">
             .XLSX
           </span>
-          <span className="px-2.5 py-1 text-xs font-mono font-medium rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+          <span className="px-2.5 py-1 text-xs font-mono font-medium rounded-md bg-white/5 text-zinc-400 border border-white/10">
             .XLS
           </span>
         </div>
 
         {disabled && (
-          <div className="absolute inset-0 bg-white/75 backdrop-blur-xs rounded-2xl flex items-center justify-center z-10">
-            <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-white border border-slate-200 shadow-lg">
-              <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin" />
-              <span className="text-xs font-semibold text-slate-900">
+          <div className="absolute inset-0 bg-[#07080c]/80 backdrop-blur-md rounded-2xl flex items-center justify-center z-10">
+            <div className="flex items-center gap-3 px-6 py-3.5 rounded-xl bg-[#121626]/90 border border-indigo-500/30 shadow-2xl shadow-indigo-500/20">
+              <div className="w-5 h-5 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+              <span className="text-xs font-semibold text-white">
                 Executing LangGraph Multi-Agent Pipeline...
               </span>
             </div>

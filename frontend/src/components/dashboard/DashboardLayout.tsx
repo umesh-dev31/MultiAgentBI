@@ -51,10 +51,18 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
   return (
     <div className={shellClass}>
+      {/* ── Glassmorphism Ambient Mesh Atmosphere ──────────────────────── */}
+      <div className="glass-atmosphere">
+        <div className="glass-orb-1" />
+        <div className="glass-orb-2" />
+        <div className="glass-orb-3" />
+      </div>
+
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <header className="dashboard-topbar">
         {/* Left: brand logo area (matches nav width) */}
         <div
+          onClick={onLanding}
           style={{
             width: navCollapsed ? 'var(--nav-collapsed)' : 'var(--nav-width)',
             flexShrink: 0,
@@ -64,30 +72,52 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             height: '100%',
             borderRight: '1px solid var(--border-subtle)',
             transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+            cursor: 'pointer',
           }}
+          title="Back to Landing Page"
         >
           {navCollapsed ? (
             <div
               style={{
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                width: 30,
+                height: 30,
+                borderRadius: 9,
+                background: 'linear-gradient(135deg, rgba(99,102,241,0.9), rgba(79,70,229,0.9))',
+                border: '1px solid rgba(255,255,255,0.25)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontWeight: 800,
                 fontSize: 11,
                 color: '#fff',
-                boxShadow: '0 0 12px rgba(99,102,241,0.4)',
+                boxShadow: '0 0 16px rgba(99,102,241,0.5), inset 0 1px 0 rgba(255,255,255,0.3)',
               }}
             >
-              AI
+              ⚡
             </div>
           ) : (
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.01em' }}>
-              AgentInsight AI
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 7,
+                  background: 'rgba(99,102,241,0.15)',
+                  border: '1px solid rgba(99,102,241,0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 12,
+                  color: '#818cf8',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15)',
+                }}
+              >
+                ⚡
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
+                AgentInsight <span style={{ color: '#818cf8' }}>AI</span>
+              </span>
+            </div>
           )}
         </div>
 
@@ -107,13 +137,15 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 gap: 7,
-                padding: '4px 10px',
+                padding: '4px 12px',
                 borderRadius: 99,
-                background: 'rgba(99,102,241,0.1)',
-                border: '1px solid rgba(99,102,241,0.25)',
+                background: 'rgba(99,102,241,0.15)',
+                border: '1px solid rgba(99,102,241,0.35)',
+                backdropFilter: 'blur(10px)',
                 fontSize: 11,
                 fontWeight: 600,
                 color: '#a5b4fc',
+                boxShadow: '0 0 14px rgba(99,102,241,0.25), inset 0 1px 0 rgba(255,255,255,0.15)',
               }}
             >
               <span
@@ -140,12 +172,14 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 gap: 8,
                 padding: '4px 12px',
                 borderRadius: 99,
-                background: 'rgba(239,68,68,0.1)',
-                border: '1px solid rgba(239,68,68,0.25)',
+                background: 'rgba(239,68,68,0.12)',
+                border: '1px solid rgba(239,68,68,0.35)',
+                backdropFilter: 'blur(10px)',
                 fontSize: 11,
                 fontWeight: 600,
                 color: '#f87171',
                 maxWidth: 400,
+                boxShadow: '0 0 14px rgba(239,68,68,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
               }}
             >
               <span>⚠</span>
@@ -189,7 +223,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           <button
             onClick={() => setInspectorOpen(p => !p)}
             className="btn-ghost"
-            style={{ fontSize: 11, padding: '5px 10px', gap: 5 }}
+            style={{ fontSize: 11, padding: '5px 12px', gap: 6 }}
             title={inspectorOpen ? 'Hide inspector panel' : 'Show inspector panel'}
           >
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
