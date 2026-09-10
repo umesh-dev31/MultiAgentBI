@@ -8,5 +8,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  optimizeDeps: {
+    include: ['react-is', 'three', '@react-three/fiber', '@react-three/drei'],
+  },
 })
 

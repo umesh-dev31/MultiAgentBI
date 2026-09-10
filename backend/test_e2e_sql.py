@@ -21,7 +21,7 @@ def run_e2e_tests():
     print("\n==================================================")
     print("2. Uploading Test Dataset")
     print("==================================================")
-    csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "brutal_data_cleaning_test.csv")
+    csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test-data", "brutal_data_cleaning_test.csv")
     with open(csv_path, "rb") as f:
         res = client.post("/api/upload", files={"file": ("brutal_data_cleaning_test.csv", f, "text/csv")})
     print("Upload Status:", res.status_code)

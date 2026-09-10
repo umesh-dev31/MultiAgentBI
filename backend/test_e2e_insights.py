@@ -19,7 +19,7 @@ def test_insights():
     print("==================================================")
     print("1. Uploading brutal_data_cleaning_test.csv")
     print("==================================================")
-    csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "brutal_data_cleaning_test.csv")
+    csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test-data", "brutal_data_cleaning_test.csv")
     with open(csv_path, "rb") as f:
         up_res = client.post("/api/upload", files={"file": ("brutal_data_cleaning_test.csv", f, "text/csv")})
     assert up_res.status_code == 200, f"Upload failed: {up_res.text}"

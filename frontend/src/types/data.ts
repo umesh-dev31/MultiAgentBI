@@ -89,3 +89,24 @@ export interface UploadResponse {
   data_quality_report?: DataQualityReport
   eda?: EDAResponse
 }
+
+export interface PipelineExecutionLog {
+  step_name: string
+  duration_seconds: number
+  status: 'success' | 'failed'
+  details?: any
+}
+
+export interface PipelineRunResponse {
+  status: string
+  filename: string
+  dataset_summary: UploadResponse
+  data_quality_report: DataQualityReport
+  eda_result: EDAResponse
+  ml_result: any
+  visualization_result: any
+  insight_result: any
+  suggested_questions: any[]
+  execution_logs: PipelineExecutionLog[]
+}
+

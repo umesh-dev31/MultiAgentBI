@@ -2,10 +2,21 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { ExecutiveSummary } from './ExecutiveSummary'
 import { SuggestedCharts } from './SuggestedCharts'
 
-export const BusinessSummaryView = ({ backendUrl, disabled = false, hasData = false }) => {
+export const BusinessSummaryView = ({
+  backendUrl,
+  disabled = false,
+  hasData = false,
+  initialData = null,
+}) => {
   const [loading, setLoading] = useState(false)
-  const [data, setData] = useState(null)
+  const [data, setData] = useState(initialData)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (initialData) {
+      setData(initialData)
+    }
+  }, [initialData])
 
   const fetchInsights = useCallback(async () => {
     if (disabled || !hasData) return
@@ -33,10 +44,10 @@ export const BusinessSummaryView = ({ backendUrl, disabled = false, hasData = fa
   }, [backendUrl, disabled, hasData])
 
   useEffect(() => {
-    if (hasData && !data) {
+    if (hasData && !data && !initialData) {
       fetchInsights()
     }
-  }, [hasData, data, fetchInsights])
+  }, [hasData, data, initialData, fetchInsights])
 
   return (
     <div className="space-y-6">

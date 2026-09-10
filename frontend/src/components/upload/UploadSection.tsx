@@ -1,10 +1,14 @@
 import React, { useRef, useState } from 'react'
+import { PipelineProgress } from './PipelineProgress'
+import type { PipelineExecutionLog } from '../../types/data'
 
 interface UploadSectionProps {
   onFileUpload: (file: File) => void
   disabled?: boolean
   activeFileName?: string
   onReset?: () => void
+  isExecutingPipeline?: boolean
+  pipelineLogs?: PipelineExecutionLog[]
 }
 
 export const UploadSection: React.FC<UploadSectionProps> = ({
@@ -12,6 +16,8 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
   disabled = false,
   activeFileName,
   onReset,
+  isExecutingPipeline = false,
+  pipelineLogs,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -147,14 +153,24 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
         </div>
 
         {disabled && (
-          <div className="absolute inset-0 bg-white/70 backdrop-blur-xs rounded-2xl flex items-center justify-center">
-            <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-white border border-slate-200 shadow-md">
-              <div className="w-4 h-4 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin" />
-              <span className="text-xs font-medium text-slate-800">Processing & Ingesting Dataset...</span>
+          <div className="absolute inset-0 bg-white/75 backdrop-blur-xs rounded-2xl flex items-center justify-center z-10">
+            <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-white border border-slate-200 shadow-lg">
+              <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin" />
+              <span className="text-xs font-semibold text-slate-900">
+                Executing LangGraph Multi-Agent Pipeline...
+              </span>
             </div>
           </div>
         )}
       </div>
+
+      {(isExecutingPipeline || (pipelineLogs && pipelineLogs.length > 0)) && (
+        <PipelineProgress
+          isExecuting={isExecutingPipeline}
+          logs={pipelineLogs}
+          fileName={activeFileName}
+        />
+      )}
     </div>
   )
 }

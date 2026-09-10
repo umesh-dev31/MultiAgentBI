@@ -26,7 +26,7 @@ def test_suggested_questions():
     print("\n==================================================")
     print("2. Uploading forecast_ready_monthly_dataset.csv")
     print("==================================================")
-    csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "forecast_ready_monthly_dataset.csv")
+    csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test-data", "forecast_ready_monthly_dataset.csv")
     with open(csv_path, "rb") as f:
         up_res = client.post("/api/upload", files={"file": ("forecast_ready_monthly_dataset.csv", f, "text/csv")})
     assert up_res.status_code == 200, f"Upload failed: {up_res.text}"

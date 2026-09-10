@@ -2,10 +2,21 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { AnomalyList } from './AnomalyList'
 import { ForecastChart } from './ForecastChart'
 
-export const MLInsightsView = ({ backendUrl, disabled = false, hasData = false }) => {
+export const MLInsightsView = ({
+  backendUrl,
+  disabled = false,
+  hasData = false,
+  initialData = null,
+}) => {
   const [loading, setLoading] = useState(false)
-  const [data, setData] = useState(null)
+  const [data, setData] = useState(initialData)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (initialData) {
+      setData(initialData)
+    }
+  }, [initialData])
 
   const fetchMLInsights = useCallback(async () => {
     if (disabled || !hasData) return
@@ -33,10 +44,10 @@ export const MLInsightsView = ({ backendUrl, disabled = false, hasData = false }
   }, [backendUrl, disabled, hasData])
 
   useEffect(() => {
-    if (hasData && !data) {
+    if (hasData && !data && !initialData) {
       fetchMLInsights()
     }
-  }, [hasData, data, fetchMLInsights])
+  }, [hasData, data, initialData, fetchMLInsights])
 
   return (
     <div className="space-y-6">
