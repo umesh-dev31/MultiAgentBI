@@ -396,3 +396,176 @@ class SQLAgent:
             }
         finally:
             conn.close()
+
+    def get_default_fallback_questions(self) -> List[Dict[str, str]]:
+        """Returns generic, schema-agnostic business questions when no dataset is loaded
+        or when schema-specific generation cannot be performed.
+        """
+        return [
+            {
+                "title": "Show me the first 10 rows",
+                "description": "Displays the initial sample of rows from the active table",
+                "icon": "📋",
+            },
+            {
+                "title": "What is the total number of records?",
+                "description": "Counts the total rows loaded in the current dataset",
+                "icon": "🔢",
+            },
+            {
+                "title": "What are the column summary statistics?",
+                "description": "Computes aggregate ranges and distribution metrics",
+                "icon": "📊",
+            },
+            {
+                "title": "Find any records with missing or empty values",
+                "description": "Scans columns for null or unpopulated entries",
+                "icon": "🔍",
+            },
+        ]
+
+    def _generate_deterministic_questions(self, df: pd.DataFrame) -> List[Dict[str, str]]:
+        """Generates 3-4 schema-grounded fallback questions based on actual column inspection."""
+        if df is None or df.empty:
+            return self.get_default_fallback_questions()
+
+        cols = list(df.columns)
+        numeric_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c]) and not str(c).lower().endswith("_id")]
+        date_cols = [c for c in cols if any(k in str(c).lower() for k in ["date", "month", "year", "time", "period"])]
+        cat_cols = [c for c in cols if c not in numeric_cols and c not in date_cols and not str(c).lower().endswith("_id")]
+
+        questions = []
+
+        # Case 1: Temporal + Metric
+        if date_cols and numeric_cols:
+            d_col = date_cols[0]
+            m_col = numeric_cols[0]
+            questions.append({
+                "title": f"Total {m_col} by {d_col}",
+                "description": f"Aggregates {m_col.lower()} performance over {d_col.lower()} periods",
+                "icon": "📈",
+            })
+            if len(numeric_cols) > 1:
+                m2_col = numeric_cols[1]
+                questions.append({
+                    "title": f"Comparison of {m_col} and {m2_col} by {d_col}",
+                    "description": f"Tracks {m_col.lower()} alongside {m2_col.lower()} across {d_col.lower()}",
+                    "icon": "⚖️",
+                })
+            else:
+                questions.append({
+                    "title": f"Highest {m_col} recorded by {d_col}",
+                    "description": f"Finds peak {d_col.lower()} based on {m_col.lower()}",
+                    "icon": "🏆",
+                })
+
+        # Case 2: Categorical + Metric
+        if cat_cols and numeric_cols:
+            c_col = cat_cols[0]
+            m_col = numeric_cols[0]
+            questions.append({
+                "title": f"Average {m_col} grouped by {c_col}",
+                "description": f"Breaks down average {m_col.lower()} across different {c_col.lower()} categories",
+                "icon": "📊",
+            })
+            questions.append({
+                "title": f"Top 5 {c_col} ranked by {m_col}",
+                "description": f"Identifies leading {c_col.lower()} performers by total {m_col.lower()}",
+                "icon": "🥇",
+            })
+
+        # Case 3: Multiple metrics without categorical
+        if not cat_cols and len(numeric_cols) >= 2 and len(questions) < 3:
+            m1, m2 = numeric_cols[0], numeric_cols[1]
+            questions.append({
+                "title": f"Average and maximum of {m1} and {m2}",
+                "description": f"Summary statistics for key metrics {m1} and {m2}",
+                "icon": "📈",
+            })
+
+        # Pad to 4 questions if needed
+        if len(questions) < 4 and numeric_cols:
+            m_col = numeric_cols[0]
+            questions.append({
+                "title": f"Distribution and range of {m_col}",
+                "description": f"Minimum, average, and maximum {m_col.lower()} across all rows",
+                "icon": "📐",
+            })
+
+        if len(questions) < 4:
+            for q in self.get_default_fallback_questions():
+                if len(questions) >= 4:
+                    break
+                if not any(existing["title"] == q["title"] for existing in questions):
+                    questions.append(q)
+
+        return questions[:4]
+
+    def generate_suggested_questions(
+        self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, str]]:
+        """Dynamically generates 3-4 schema-relevant business questions based on
+        the actual column names, types, and samples of the provided dataset using the LLM.
+        """
+        if df is None or df.empty:
+            return self.get_default_fallback_questions()
+
+        # Build clean schema summary
+        col_summaries = []
+        for c in df.columns:
+            dtype_str = str(df[c].dtype)
+            sample_vals = [str(x) for x in df[c].dropna().head(2).tolist()]
+            sample_str = ", ".join(sample_vals) if sample_vals else "empty"
+            col_summaries.append(f"- '{c}' ({dtype_str}, sample values: [{sample_str}])")
+        schema_text = "\n".join(col_summaries)
+
+        system_prompt = (
+            "You are an expert Business Intelligence advisor and SQL specialist. "
+            "Given the exact column names, data types, and sample values of a loaded dataset, "
+            "generate 3 to 4 natural, insightful, executive-level business questions that a manager "
+            "would ask about this data.\n\n"
+            "STRICT RULES:\n"
+            "1. You MUST ONLY reference columns that ACTUALLY exist in the provided schema. NEVER invent or assume columns like 'region', 'product', 'customer', or 'revenue' unless they are explicitly in the schema.\n"
+            "2. Each question must be answerable using a single SQLite query against the table 'data' (or 'orders').\n"
+            "3. Make questions diverse: e.g. temporal trends, rankings, aggregations, ratios/differences, or averages.\n"
+            "4. Return ONLY a strict JSON array of 3 to 4 objects. Each object MUST have:\n"
+            "   - 'title': The concise natural-language business question (e.g., 'What is the total Revenue by Month?')\n"
+            "   - 'description': A 1-sentence explanation of what the question reveals.\n"
+            "   - 'icon': A single relevant emoji representing the query (e.g. 📈, 💰, 📊, 👥, 🏆, 📦)."
+        )
+
+        user_prompt = (
+            f"Here is the schema and sample data for the currently loaded table:\n\n"
+            f"{schema_text}\n\n"
+            f"Generate 3 to 4 tailored business questions now. Return strictly a JSON array."
+        )
+
+        try:
+            raw_resp = self._call_llm(user_prompt, system_prompt)
+            cleaned_resp = raw_resp.strip()
+            arr_match = re.search(r"\[\s*\{.*\}\s*\]", cleaned_resp, re.DOTALL)
+            if arr_match:
+                cleaned_resp = arr_match.group(0)
+
+            import json
+            parsed = json.loads(cleaned_resp)
+            if isinstance(parsed, list) and len(parsed) >= 2:
+                valid_questions = []
+                for item in parsed:
+                    if isinstance(item, dict) and item.get("title") and item.get("description"):
+                        title = str(item["title"]).strip()
+                        desc = str(item["description"]).strip()
+                        icon = str(item.get("icon", "📊")).strip()
+                        valid_questions.append({
+                            "title": title,
+                            "description": desc,
+                            "icon": icon or "📊",
+                        })
+                if len(valid_questions) >= 3:
+                    return valid_questions[:4]
+        except Exception:
+            pass
+
+        # Fall back to schema-grounded deterministic questions
+        return self._generate_deterministic_questions(df)
+

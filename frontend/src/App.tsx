@@ -11,11 +11,12 @@ import { CorrelationMatrix } from './components/eda/CorrelationMatrix'
 import { MonthlyTrendChart } from './components/eda/MonthlyTrendChart'
 import { AskQuestionView } from './components/sql/AskQuestionView'
 import { MLInsightsView } from './components/ml/MLInsightsView'
+import { BusinessSummaryView } from './components/insights/BusinessSummaryView'
 import type { EDAResponse, UploadResponse } from './types/data'
 
 const BACKEND_URL = 'http://localhost:8000'
 
-type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml'
+type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights'
 
 function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('upload')
@@ -272,6 +273,24 @@ function App() {
               </span>
               <span>ML Insights</span>
             </button>
+
+            {/* Tab 6: Business Summary */}
+            <button
+              onClick={() => hasData && setActiveTab('insights')}
+              disabled={!hasData}
+              className={`flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all whitespace-nowrap ${
+                activeTab === 'insights'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : hasData
+                  ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer'
+                  : 'text-slate-400 cursor-not-allowed opacity-60'
+              }`}
+            >
+              <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold border border-current">
+                6
+              </span>
+              <span>Business Summary</span>
+            </button>
           </nav>
         </div>
       </header>
@@ -339,6 +358,12 @@ function App() {
                     className="px-4 py-2 text-xs font-bold rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition cursor-pointer shadow-xs"
                   >
                     Explore ML Insights →
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('insights')}
+                    className="px-4 py-2 text-xs font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition cursor-pointer shadow-xs"
+                  >
+                    View Business Summary →
                   </button>
                 </div>
               </div>
@@ -475,7 +500,27 @@ function App() {
 
         {/* TAB 5: ML INSIGHTS (ML AGENT) VIEW */}
         {activeTab === 'ml' && (
-          <MLInsightsView
+          <div className="space-y-6">
+            <MLInsightsView
+              backendUrl={BACKEND_URL}
+              disabled={!hasData}
+              hasData={hasData}
+            />
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setActiveTab('insights')}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm transition cursor-pointer"
+              >
+                <span>Proceed to Business Summary</span>
+                <span>→</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 6: BUSINESS SUMMARY VIEW */}
+        {activeTab === 'insights' && (
+          <BusinessSummaryView
             backendUrl={BACKEND_URL}
             disabled={!hasData}
             hasData={hasData}

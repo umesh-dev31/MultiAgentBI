@@ -166,10 +166,11 @@ class EDAAgent:
 
         # =====================================================================
         # 2. CATEGORICAL SUMMARY (Top 5 values with counts & percentages)
+        # Computed strictly on validated subset to maintain population consistency
         # =====================================================================
         categorical_summary: Dict[str, List[Dict[str, Any]]] = {}
         for col in categorical_cols:
-            s = data[col].dropna().astype(str).str.strip()
+            s = validated_df[col].dropna().astype(str).str.strip()
             # Ignore purely empty strings
             s = s[s != ""]
             if len(s) == 0:

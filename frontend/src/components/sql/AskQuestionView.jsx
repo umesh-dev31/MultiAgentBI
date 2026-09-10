@@ -82,6 +82,7 @@ export const AskQuestionView = ({ backendUrl, disabled = false }) => {
       <ExampleQuestions
         onSelectQuestion={handleSelectExample}
         disabled={disabled || loading}
+        backendUrl={backendUrl}
       />
 
       {/* 3. Query Results (Code Block + Results Table) or Error / Loading */}
