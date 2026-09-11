@@ -3,7 +3,18 @@ import { QueryInput } from './QueryInput'
 import { ExampleQuestions } from './ExampleQuestions'
 import { QueryResult } from './QueryResult'
 
-export const AskQuestionView = ({ backendUrl, disabled = false }) => {
+/**
+ * @param {{
+ *   backendUrl: string,
+ *   disabled?: boolean,
+ *   suggestedQuestions?: any[] | null
+ * }} props
+ */
+export const AskQuestionView = ({
+  backendUrl,
+  disabled = false,
+  suggestedQuestions = null,
+}) => {
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
   const [resultData, setResultData] = useState(null)
@@ -83,6 +94,7 @@ export const AskQuestionView = ({ backendUrl, disabled = false }) => {
         onSelectQuestion={handleSelectExample}
         disabled={disabled || loading}
         backendUrl={backendUrl}
+        initialQuestions={suggestedQuestions}
       />
 
       {/* 3. Query Results (Code Block + Results Table) or Error / Loading */}

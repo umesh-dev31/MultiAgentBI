@@ -23,12 +23,12 @@ function deriveAgentStatuses(
   isProcessing: boolean
 ): AgentInfo[] {
   const agents: AgentInfo[] = [
-    { id: 'data_cleaning', label: 'Data Agent', icon: '🧹', status: 'idle' },
-    { id: 'validation',    label: 'Validation',  icon: '🛡️',  status: 'idle' },
-    { id: 'eda',           label: 'EDA Agent',   icon: '📊',  status: 'idle' },
-    { id: 'ml',            label: 'ML Agent',    icon: '🤖',  status: 'idle' },
-    { id: 'visualization', label: 'Viz Agent',   icon: '🎨',  status: 'idle' },
-    { id: 'insight',       label: 'Insight Agent', icon: '💡', status: 'idle' },
+    { id: 'data_cleaning', label: 'Data Agent', icon: '01', status: 'idle' },
+    { id: 'validation',    label: 'Validation',  icon: '02', status: 'idle' },
+    { id: 'eda',           label: 'EDA Agent',   icon: '03', status: 'idle' },
+    { id: 'ml',            label: 'ML Agent',    icon: '04', status: 'idle' },
+    { id: 'visualization', label: 'Viz Agent',   icon: '05', status: 'idle' },
+    { id: 'insight',       label: 'Insight Agent', icon: '06', status: 'idle' },
   ]
 
   if (!logs || logs.length === 0) {
@@ -37,9 +37,31 @@ function deriveAgentStatuses(
   }
 
   return agents.map(agent => {
-    const match = logs.find(l => l.step_name?.toLowerCase().includes(agent.id.toLowerCase()))
+    const match = logs.find(l => {
+      const step = (l.step_name || (l as any).step || '').toLowerCase().replace(/[\s_-]+/g, '')
+      const id = agent.id.toLowerCase().replace(/[\s_-]+/g, '')
+      const label = agent.label.toLowerCase().replace(/[\s_-]+/g, '')
+
+      return (
+        step === id ||
+        step.includes(id) ||
+        id.includes(step) ||
+        step.includes(label) ||
+        label.includes(step) ||
+        (agent.id === 'data_cleaning' && (step.includes('data') || step.includes('cleaning'))) ||
+        (agent.id === 'validation' && step.includes('validation')) ||
+        (agent.id === 'eda' && step.includes('eda')) ||
+        (agent.id === 'ml' && step.includes('ml')) ||
+        (agent.id === 'visualization' && (step.includes('visual') || step.includes('viz') || step.includes('chart'))) ||
+        (agent.id === 'insight' && (step.includes('insight') || step.includes('summary')))
+      )
+    })
     if (!match) return agent
-    const dur = match.duration_seconds != null ? `${match.duration_seconds.toFixed(1)}s` : undefined
+    const dur = match.duration_seconds != null
+      ? match.duration_seconds < 0.05 && match.duration_seconds > 0
+        ? '<0.1s'
+        : `${match.duration_seconds.toFixed(1)}s`
+      : undefined
     const status: AgentStatus = match.status === 'success' ? 'done' : match.status === 'failed' ? 'error' : 'done'
     return { ...agent, status, duration: dur }
   })
@@ -119,18 +141,18 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
           zIndex: 10,
         }}
       >
-        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="var(--accent-indigo)" strokeWidth={2}>
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="var(--text-primary)" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
         </svg>
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.02em' }}>
           Inspector
         </span>
         {isProcessing && (
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: '#a5b4fc', fontWeight: 600 }}>
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-primary)', fontWeight: 600 }}>
             <span
               style={{
                 width: 10, height: 10, borderRadius: '50%',
-                border: '2px solid #6366f1', borderTopColor: 'transparent',
+                border: '2px solid var(--text-primary)', borderTopColor: 'transparent',
                 animation: 'spin 0.8s linear infinite',
                 display: 'inline-block',
               }}
@@ -143,8 +165,12 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
       {/* No data empty state */}
       {!datasetResult && !isProcessing && (
         <div className="empty-state" style={{ padding: '40px 16px' }}>
-          <div className="empty-state-icon">🔍</div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>No dataset loaded</div>
+          <div className="empty-state-icon">
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>No dataset loaded</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 200 }}>
             Upload a CSV to see pipeline telemetry and schema details here.
           </div>
@@ -155,12 +181,12 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
         <div className="empty-state" style={{ padding: '40px 16px', gap: 10 }}>
           <div
             style={{
-              width: 40, height: 40, borderRadius: '50%',
-              border: '3px solid var(--accent-indigo)', borderTopColor: 'transparent',
+              width: 32, height: 32, borderRadius: '50%',
+              border: '2.5px solid var(--text-primary)', borderTopColor: 'transparent',
               animation: 'spin 0.9s linear infinite',
             }}
           />
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Pipeline running…</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Pipeline running…</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Agents are processing your dataset</div>
         </div>
       )}
@@ -175,14 +201,14 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                 <div
                   style={{
                     padding: '8px 10px',
-                    borderRadius: 8,
-                    background: 'rgba(99,102,241,0.07)',
-                    border: '1px solid rgba(99,102,241,0.15)',
+                    borderRadius: 6,
+                    background: 'var(--border-subtle)',
+                    border: '1px solid var(--border-medium)',
                     marginBottom: 10,
                   }}
                 >
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>File</div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', wordBreak: 'break-all' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', wordBreak: 'break-all' }}>
                     {activeFileName}
                   </div>
                 </div>
@@ -199,7 +225,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                       key={label}
                       style={{
                         padding: '8px 10px',
-                        borderRadius: 8,
+                        borderRadius: 6,
                         background: 'var(--bg-surface2)',
                         border: '1px solid var(--border-subtle)',
                       }}
@@ -232,13 +258,13 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                   alignItems: 'center',
                   gap: 8,
                   padding: '7px 10px',
-                  borderRadius: 8,
+                  borderRadius: 6,
                   background: 'var(--bg-surface2)',
                   border: '1px solid var(--border-subtle)',
                 }}
               >
-                <span style={{ fontSize: 13 }}>{agent.icon}</span>
-                <span style={{ flex: 1, fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-muted)' }}>{agent.icon}</span>
+                <span style={{ flex: 1, fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
                   {agent.label}
                 </span>
                 <span className={`agent-pill ${agent.status}`} style={{ padding: '2px 8px', fontSize: 10 }}>

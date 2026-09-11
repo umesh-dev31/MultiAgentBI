@@ -27,9 +27,21 @@ export const ExampleQuestions = ({
   onSelectQuestion,
   disabled = false,
   backendUrl = 'http://localhost:8000',
+  initialQuestions = null,
 }) => {
-  const [questions, setQuestions] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [questions, setQuestions] = useState(
+    initialQuestions && initialQuestions.length > 0 ? initialQuestions : []
+  )
+  const [loading, setLoading] = useState(
+    !initialQuestions || initialQuestions.length === 0
+  )
+
+  useEffect(() => {
+    if (initialQuestions && initialQuestions.length > 0) {
+      setQuestions(initialQuestions)
+      setLoading(false)
+    }
+  }, [initialQuestions])
 
   const fetchQuestions = useCallback(async (refresh = false) => {
     setLoading(true)
@@ -53,8 +65,10 @@ export const ExampleQuestions = ({
   }, [backendUrl])
 
   useEffect(() => {
-    fetchQuestions(false)
-  }, [fetchQuestions])
+    if (!initialQuestions || initialQuestions.length === 0) {
+      fetchQuestions(false)
+    }
+  }, [fetchQuestions, initialQuestions])
 
   return (
     <div className="space-y-2.5">

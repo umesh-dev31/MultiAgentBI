@@ -223,8 +223,9 @@ class Orchestrator:
         print(f"\033[94m[LangGraph Orchestrator] ─── Step 3/6: EDA Node (EDAAgent) ───\033[0m")
         t0 = time.time()
         try:
+            target_df = state.get("validated_df") if state.get("validated_df") is not None else state.get("cleaned_df")
             eda_result = self.eda_agent.analyze(
-                state.get("cleaned_df"), quality_report=state.get("data_quality_report")
+                target_df, quality_report=state.get("data_quality_report") if state.get("validated_df") is None else None
             )
             elapsed = time.time() - t0
             patterns_cnt = len(eda_result.get("notable_patterns", []))
@@ -250,8 +251,9 @@ class Orchestrator:
         print(f"\033[94m[LangGraph Orchestrator] ─── Step 4/6: ML Node (MLAgent) ───\033[0m")
         t0 = time.time()
         try:
+            target_df = state.get("validated_df") if state.get("validated_df") is not None else state.get("cleaned_df")
             ml_result = self.ml_agent.analyze(
-                state.get("cleaned_df"), quality_report=state.get("data_quality_report")
+                target_df, quality_report=state.get("data_quality_report") if state.get("validated_df") is None else None
             )
             elapsed = time.time() - t0
             anom_cnt = ml_result.get("anomalies", {}).get("anomaly_count", 0)
@@ -278,10 +280,11 @@ class Orchestrator:
         print(f"\033[94m[LangGraph Orchestrator] ─── Step 5/6: Visualization Node (VisualizationAgent) ───\033[0m")
         t0 = time.time()
         try:
+            target_df = state.get("validated_df") if state.get("validated_df") is not None else state.get("cleaned_df")
             viz_res = self.visualization_agent.suggest_charts(
-                state.get("cleaned_df"),
+                target_df,
                 eda_result=state.get("eda_result"),
-                quality_report=state.get("data_quality_report"),
+                quality_report=state.get("data_quality_report") if state.get("validated_df") is None else None,
             )
             elapsed = time.time() - t0
             charts_cnt = len(viz_res.get("charts", []))

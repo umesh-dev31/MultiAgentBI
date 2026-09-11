@@ -53,6 +53,7 @@ export interface CategoricalValueCount {
   value: string
   count: number
   percentage: number
+  total_distinct?: number
 }
 
 export interface CorrelationMatrixData {

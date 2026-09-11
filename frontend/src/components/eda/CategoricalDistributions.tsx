@@ -33,6 +33,7 @@ export const CategoricalDistributions: React.FC<CategoricalDistributionsProps> =
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {categoricalCols.map((col) => {
           const items = categoricalSummary[col]
+          const distinctCount = items[0]?.total_distinct ?? items.length
           return (
             <div
               key={col}
@@ -44,7 +45,7 @@ export const CategoricalDistributions: React.FC<CategoricalDistributionsProps> =
                     {col}
                   </span>
                   <span className="text-[11px] font-medium text-slate-500">
-                    {items.length} distinct
+                    {distinctCount} distinct
                   </span>
                 </div>
 

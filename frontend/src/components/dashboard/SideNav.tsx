@@ -120,28 +120,25 @@ export const SideNav: React.FC<SideNavProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div
               style={{
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                width: 26,
+                height: 26,
+                borderRadius: 5,
+                border: '1px solid var(--border-medium)',
+                background: 'var(--border-subtle)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontWeight: 800,
-                fontSize: 11,
-                color: '#fff',
                 flexShrink: 0,
-                boxShadow: '0 0 12px rgba(99,102,241,0.4)',
               }}
             >
-              AI
+              <span style={{ width: 8, height: 8, background: 'var(--text-primary)', borderRadius: 2 }} />
             </div>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>
                 AgentInsight
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
-                v0.2 · Multi-Agent BI
+                Multi-Agent BI
               </div>
             </div>
           </div>
@@ -189,16 +186,16 @@ export const SideNav: React.FC<SideNavProps> = ({
           style={{
             margin: '10px 10px 4px',
             padding: '8px 10px',
-            borderRadius: 8,
-            background: 'rgba(99,102,241,0.07)',
-            border: '1px solid rgba(99,102,241,0.18)',
+            borderRadius: 6,
+            background: 'var(--border-subtle)',
+            border: '1px solid var(--border-medium)',
           }}
         >
           <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 3 }}>
             Active Dataset
           </div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            📁 {activeFileName}
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {activeFileName}
           </div>
         </div>
       )}
@@ -262,7 +259,6 @@ export const SideNav: React.FC<SideNavProps> = ({
           flexShrink: 0,
         }}
       >
-        {/* Backend status */}
         <div
           style={{
             display: 'flex',
@@ -273,11 +269,12 @@ export const SideNav: React.FC<SideNavProps> = ({
             background: 'var(--bg-surface2)',
             justifyContent: collapsed ? 'center' : 'flex-start',
           }}
+          title={backendOnline === true ? 'Backend Systems Online' : backendOnline === false ? 'API Offline' : 'Connecting to API...'}
         >
           <span className={`status-dot ${statusClass}`} />
           {!collapsed && (
             <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
-              {backendOnline === true ? 'API Online' : backendOnline === false ? 'API Offline' : 'Connecting…'}
+              {backendOnline === true ? 'Online' : backendOnline === false ? 'API Offline' : 'Connecting…'}
             </span>
           )}
         </div>

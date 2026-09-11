@@ -39,20 +39,43 @@ function App() {
   const [edaResult, setEdaResult] = useState<EDAResponse | null>(null)
   const [mlResult, setMlResult] = useState<any>(null)
   const [insightsResult, setInsightsResult] = useState<any>(null)
+  const [suggestedQuestions, setSuggestedQuestions] = useState<any[] | null>(null)
   const [pipelineLogs, setPipelineLogs] = useState<PipelineExecutionLog[] | undefined>(undefined)
 
-  // Verify backend health on mount
+  // Verify backend health on mount and periodically
   const checkHealth = async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/health`)
-      setBackendOnline(res.ok)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 4000)
+
+      let ok = false
+      try {
+        const res = await fetch(`${BACKEND_URL}/health`, { signal: controller.signal })
+        ok = res.ok
+      } catch {
+        // Fallback to 127.0.0.1 if localhost IPv6 resolution fails on Windows
+        try {
+          const fallbackRes = await fetch('http://127.0.0.1:8000/health', { signal: controller.signal })
+          ok = fallbackRes.ok
+        } catch {
+          ok = false
+        }
+      } finally {
+        clearTimeout(timeoutId)
+      }
+
+      setBackendOnline(ok)
     } catch {
-      setBackendOnline(false)
+      if (!uploading) {
+        setBackendOnline(false)
+      }
     }
   }
 
   useEffect(() => {
     checkHealth()
+    const interval = setInterval(checkHealth, 3000)
+    return () => clearInterval(interval)
   }, [])
 
   const handleUploadFile = async (file: File) => {
@@ -83,10 +106,12 @@ function App() {
 
       const data: PipelineRunResponse = await response.json()
 
+      setBackendOnline(true)
       setPipelineLogs(data.execution_logs || [])
       setDatasetResult(data.dataset_summary)
       setEdaResult(data.eda_result)
       setMlResult(data.ml_result)
+      setSuggestedQuestions(data.suggested_questions || null)
 
       const combinedInsights = {
         ...(data.insight_result || {}),
@@ -106,6 +131,7 @@ function App() {
       setEdaResult(null)
       setMlResult(null)
       setInsightsResult(null)
+      setSuggestedQuestions(null)
     } finally {
       setUploading(false)
     }
@@ -116,6 +142,7 @@ function App() {
     setEdaResult(null)
     setMlResult(null)
     setInsightsResult(null)
+    setSuggestedQuestions(null)
     setPipelineLogs(undefined)
     setEdaLoading(false)
     setError(null)
@@ -328,7 +355,11 @@ function App() {
                 Natural language → SQL → results. The SQL Agent translates your question and runs it against the cleaned dataset.
               </p>
             </div>
-            <AskQuestionView backendUrl={BACKEND_URL} disabled={!hasData} />
+            <AskQuestionView
+              backendUrl={BACKEND_URL}
+              disabled={!hasData}
+              suggestedQuestions={suggestedQuestions as any}
+            />
           </div>
         )}
 

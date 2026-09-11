@@ -177,6 +177,7 @@ class EDAAgent:
                 continue
 
             total_valid = len(s)
+            total_unique = int(s.nunique())
             val_counts = s.value_counts().head(5)
 
             top_values = []
@@ -186,6 +187,7 @@ class EDAAgent:
                     "value": str(val),
                     "count": int(count),
                     "percentage": pct,
+                    "total_distinct": total_unique,
                 })
             categorical_summary[col] = top_values
 

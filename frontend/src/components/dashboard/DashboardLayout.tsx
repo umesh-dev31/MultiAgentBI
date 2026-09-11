@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { SideNav } from './SideNav'
 import { RightInspector } from './RightInspector'
+import { ThemeToggle } from '../ThemeToggle'
 import type { PipelineExecutionLog, UploadResponse } from '../../types/data'
 
 type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights'
@@ -51,13 +52,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
   return (
     <div className={shellClass}>
-      {/* ── Glassmorphism Ambient Mesh Atmosphere ──────────────────────── */}
-      <div className="glass-atmosphere">
-        <div className="glass-orb-1" />
-        <div className="glass-orb-2" />
-        <div className="glass-orb-3" />
-      </div>
-
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <header className="dashboard-topbar">
         {/* Left: brand logo area (matches nav width) */}
@@ -79,43 +73,36 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           {navCollapsed ? (
             <div
               style={{
-                width: 30,
-                height: 30,
-                borderRadius: 9,
-                background: 'linear-gradient(135deg, rgba(99,102,241,0.9), rgba(79,70,229,0.9))',
-                border: '1px solid rgba(255,255,255,0.25)',
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                background: 'var(--border-subtle)',
+                border: '1px solid var(--border-medium)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontWeight: 800,
-                fontSize: 11,
-                color: '#fff',
-                boxShadow: '0 0 16px rgba(99,102,241,0.5), inset 0 1px 0 rgba(255,255,255,0.3)',
               }}
             >
-              ⚡
+              <span style={{ width: 10, height: 10, background: 'var(--text-primary)', borderRadius: 2 }} />
             </div>
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div
                 style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: 7,
-                  background: 'rgba(99,102,241,0.15)',
-                  border: '1px solid rgba(99,102,241,0.35)',
+                  width: 24,
+                  height: 24,
+                  borderRadius: 5,
+                  border: '1px solid var(--border-medium)',
+                  background: 'var(--border-subtle)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 12,
-                  color: '#818cf8',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15)',
                 }}
               >
-                ⚡
+                <span style={{ width: 8, height: 8, background: 'var(--text-primary)', borderRadius: 2 }} />
               </div>
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-                AgentInsight <span style={{ color: '#818cf8' }}>AI</span>
+                AgentInsight <span style={{ color: 'var(--text-muted)' }}>AI</span>
               </span>
             </div>
           )}
@@ -126,7 +113,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Dashboard</span>
             <span style={{ color: 'var(--border-medium)' }}>›</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'capitalize' }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', textTransform: 'capitalize' }}>
               {activeTab === 'sql' ? 'Ask a Question' : activeTab === 'eda' ? 'Exploration' : activeTab === 'ml' ? 'ML Insights' : activeTab === 'insights' ? 'Business Summary' : activeTab === 'quality' ? 'Data Quality' : 'Upload'}
             </span>
           </div>
@@ -138,14 +125,12 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 alignItems: 'center',
                 gap: 7,
                 padding: '4px 12px',
-                borderRadius: 99,
-                background: 'rgba(99,102,241,0.15)',
-                border: '1px solid rgba(99,102,241,0.35)',
-                backdropFilter: 'blur(10px)',
+                borderRadius: 6,
+                background: 'var(--border-subtle)',
+                border: '1px solid var(--border-medium)',
                 fontSize: 11,
                 fontWeight: 600,
-                color: '#a5b4fc',
-                boxShadow: '0 0 14px rgba(99,102,241,0.25), inset 0 1px 0 rgba(255,255,255,0.15)',
+                color: 'var(--text-primary)',
               }}
             >
               <span
@@ -153,7 +138,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                   width: 10,
                   height: 10,
                   borderRadius: '50%',
-                  border: '2px solid #6366f1',
+                  border: '2px solid var(--text-primary)',
                   borderTopColor: 'transparent',
                   display: 'inline-block',
                   animation: 'spin 0.8s linear infinite',
@@ -206,6 +191,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
         {/* Right: controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <ThemeToggle />
+
           {hasData && (
             <button
               onClick={onReset}

@@ -48,27 +48,29 @@ class MLAgent:
         if not aggregated_metric_cols:
             aggregated_metric_cols = [c for c in numeric_cols if not c.lower().endswith("_id")]
 
-        # 3. Exclude negative AND zero values in non-negative metrics
-        # (zero quantity or zero price is business-invalid — same rule as DataAgent)
+        # 3. Exclude strictly negative values in non-negative metrics (< 0)
+        # Consistent with DataAgent and EDAAgent business rules
         for col in aggregated_metric_cols:
-            invalid_mask = data[col] <= 0
+            invalid_mask = data[col] < 0
             for idx in data[invalid_mask].index:
                 excluded_indices.add(idx)
 
         # 4. Exclude extreme statistical outliers (> 3x IQR from median)
-        for col in aggregated_metric_cols:
-            clean_s = data[col].dropna()
-            if len(clean_s) >= 4:
-                q25 = clean_s.quantile(0.25)
-                q75 = clean_s.quantile(0.75)
-                iqr = q75 - q25
-                med = clean_s.median()
-                if iqr > 0:
-                    lower_lim = med - 3.0 * iqr
-                    upper_lim = med + 3.0 * iqr
-                    outlier_mask = (clean_s < lower_lim) | (clean_s > upper_lim)
-                    for idx in clean_s[outlier_mask].index:
-                        excluded_indices.add(idx)
+        # Only run if quality_report is provided (indicates raw/cleaned df; validated_df has already purged outliers)
+        if quality_report:
+            for col in aggregated_metric_cols:
+                clean_s = data[col].dropna()
+                if len(clean_s) >= 4:
+                    q25 = clean_s.quantile(0.25)
+                    q75 = clean_s.quantile(0.75)
+                    iqr = q75 - q25
+                    med = clean_s.median()
+                    if iqr > 0:
+                        lower_lim = med - 3.0 * iqr
+                        upper_lim = med + 3.0 * iqr
+                        outlier_mask = (clean_s < lower_lim) | (clean_s > upper_lim)
+                        for idx in clean_s[outlier_mask].index:
+                            excluded_indices.add(idx)
 
         # 5. Exclude null values in aggregated metric columns
         for col in aggregated_metric_cols:

@@ -43,12 +43,6 @@ export const BusinessSummaryView = ({
     }
   }, [backendUrl, disabled, hasData])
 
-  useEffect(() => {
-    if (hasData && !data && !initialData) {
-      fetchInsights()
-    }
-  }, [hasData, data, initialData, fetchInsights])
-
   return (
     <div className="space-y-6">
       {/* Header Banner */}

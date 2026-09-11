@@ -193,11 +193,15 @@ class DataAgent:
         # Ensure clean integer 0..N index
         df = df.reset_index(drop=True)
 
+        # Preserve the pristine, untouched RAW dataframe before ANY transformations
+        raw_df = df.copy()
+        df["_raw_row_idx"] = list(range(len(df)))
+
         # Ensure object dtype so numeric, string, and null assignments do not trigger StringDtype TypeErrors
         df = df.astype(object)
 
         original_rows = int(len(df))
-        original_cols = int(len(df.columns))
+        original_cols = int(len(raw_df.columns))
 
         # Track quality report stats
         auto_fixed_counts = {
@@ -216,9 +220,10 @@ class DataAgent:
         # =====================================================================
         # 1. SAFE AUTO-FIX: Remove exact duplicate rows
         # =====================================================================
-        duplicate_count = int(df.duplicated().sum())
+        data_cols = [c for c in df.columns if c != "_raw_row_idx"]
+        duplicate_count = int(df.duplicated(subset=data_cols).sum())
         if duplicate_count > 0:
-            df = df.drop_duplicates().reset_index(drop=True)
+            df = df.drop_duplicates(subset=data_cols).reset_index(drop=True)
             auto_fixed_counts["duplicate_rows_dropped"] = duplicate_count
 
         rows_after_dedup = int(len(df))
@@ -228,7 +233,7 @@ class DataAgent:
         # =====================================================================
         null_literal_set = {"nan", "n/a", "none", "null", ""}
 
-        for col in df.columns:
+        for col in [c for c in df.columns if c != "_raw_row_idx"]:
             for idx in range(rows_after_dedup):
                 val = df.at[idx, col]
                 if isinstance(val, str):
@@ -245,7 +250,7 @@ class DataAgent:
 
         # Record initial missing stats per column right after standardizing nulls
         initial_missing_stats: Dict[str, Dict[str, Any]] = {}
-        for col in df.columns:
+        for col in [c for c in df.columns if c != "_raw_row_idx"]:
             col_str = str(col)
             miss_cnt = int(df[col].isna().sum())
             miss_pct = (
@@ -262,7 +267,7 @@ class DataAgent:
         # 3. SAFE AUTO-FIX: Normalize casing for low-cardinality categorical columns
         # (Exclude customer_name, city, and high-cardinality/identifier columns)
         # =====================================================================
-        for col in df.columns:
+        for col in [c for c in df.columns if c != "_raw_row_idx"]:
             col_str = str(col)
             col_lower = col_str.lower()
 
@@ -287,7 +292,7 @@ class DataAgent:
         # =====================================================================
         # 4. DATE PARSING & FLAGGING (order_date and date-like columns)
         # =====================================================================
-        for col in df.columns:
+        for col in [c for c in df.columns if c != "_raw_row_idx"]:
             col_str = str(col)
             if self._is_date_column(col_str, df[col]):
                 for idx in range(rows_after_dedup):
@@ -301,22 +306,27 @@ class DataAgent:
                             # Flag unparseable or impossible calendar dates (e.g. Feb 30, Month 13)
                             df.at[idx, col] = np.nan
                             flagged_cells.add((idx, col_str))
+                            raw_idx = int(df.at[idx, "_raw_row_idx"])
+                            raw_val = raw_df.at[raw_idx, col]
+                            raw_display = str(raw_val) if pd.notna(raw_val) else str(val)
                             flagged_for_review.append(
                                 {
                                     "row_index": idx + 1,
                                     "column": col_str,
-                                    "original_value": val,
-                                    "reason": f"Unparseable or impossible calendar date '{val}'",
+                                    "original_value": raw_display,
+                                    "reason": f"Unparseable or impossible calendar date '{raw_display}'",
                                 }
                             )
 
         # =====================================================================
         # 5. NUMERIC CLEANING & NON-NUMERIC TEXT FLAGGING
         # =====================================================================
-        for col in df.columns:
+        for col in [c for c in df.columns if c != "_raw_row_idx"]:
             col_str = str(col)
             if self._is_numeric_target_column(col_str, df[col]):
                 for idx in range(rows_after_dedup):
+                    raw_idx = int(df.at[idx, "_raw_row_idx"])
+                    raw_val = raw_df.at[raw_idx, col]
                     val = df.at[idx, col]
                     if pd.notna(val) and isinstance(val, str):
                         cleaned_str = re.sub(r"[\$€£¥\s]", "", val).replace(",", "")
@@ -324,12 +334,13 @@ class DataAgent:
                         if cleaned_str.lower() in ["infinity", "-infinity", "+infinity", "inf", "-inf"]:
                             df.at[idx, col] = np.nan
                             flagged_cells.add((idx, col_str))
+                            raw_display = str(raw_val) if pd.notna(raw_val) else str(val)
                             flagged_for_review.append(
                                 {
                                     "row_index": idx + 1,
                                     "column": col_str,
-                                    "original_value": val,
-                                    "reason": f"Non-numeric text '{val}' in numeric column",
+                                    "original_value": raw_display,
+                                    "reason": f"Non-numeric text '{raw_display}' in numeric column",
                                 }
                             )
                         else:
@@ -342,42 +353,52 @@ class DataAgent:
                                 # Non-numeric text that can't be safely parsed (e.g. 'six', '15O00')
                                 df.at[idx, col] = np.nan
                                 flagged_cells.add((idx, col_str))
+
+                                # ALWAYS use the raw untouched input value exactly as uploaded
+                                raw_display = str(raw_val) if pd.notna(raw_val) else str(val)
+
+                                reason_str = f"Non-numeric text '{raw_display}' in numeric column"
+                                if any(c in raw_display for c in ["O", "o"]) and re.search(r"\d", raw_display):
+                                    reason_str = f"Non-numeric text '{raw_display}' (contains letter 'O', not zero) in numeric column"
+
                                 flagged_for_review.append(
                                     {
                                         "row_index": idx + 1,
                                         "column": col_str,
-                                        "original_value": val,
-                                        "reason": f"Non-numeric text '{val}' in numeric column",
+                                        "original_value": raw_display,
+                                        "reason": reason_str,
                                     }
                                 )
 
         # =====================================================================
         # 6. FLAGGED ISSUES: Negative values & Statistical outliers
         # =====================================================================
-        for col in df.columns:
+        for col in [c for c in df.columns if c != "_raw_row_idx"]:
             col_str = str(col)
             col_lower = col_str.lower()
 
             # Negative and zero values in columns that must be strictly positive
             if self._is_non_negative_column(col_str):
                 numeric_s = pd.to_numeric(df[col], errors="coerce")
-                for idx, val in numeric_s.items():
-                    if pd.notna(val) and val < 0:
+                for idx, num_val in numeric_s.items():
+                    raw_idx = int(df.at[idx, "_raw_row_idx"])
+                    raw_val = raw_df.at[raw_idx, col]
+                    if pd.notna(num_val) and num_val < 0:
                         flagged_for_review.append(
                             {
                                 "row_index": int(idx) + 1,
                                 "column": col_str,
-                                "original_value": val,
-                                "reason": f"Negative value ({val}) in column that should be non-negative",
+                                "original_value": raw_val,
+                                "reason": f"Negative value ({raw_val}) in column that should be non-negative",
                             }
                         )
-                    elif pd.notna(val) and val == 0:
+                    elif pd.notna(num_val) and num_val == 0:
                         # A valid order cannot have 0 quantity or 0 unit_price
                         flagged_for_review.append(
                             {
                                 "row_index": int(idx) + 1,
                                 "column": col_str,
-                                "original_value": val,
+                                "original_value": raw_val,
                                 "reason": f"Zero value in '{col_str}' — business-invalid (a valid order requires quantity > 0 and unit_price > 0)",
                             }
                         )
@@ -393,13 +414,15 @@ class DataAgent:
                     if iqr > 0:
                         lower_bound = median_val - 3.0 * iqr
                         upper_bound = median_val + 3.0 * iqr
-                        for idx, val in numeric_s.items():
-                            if val < lower_bound or val > upper_bound:
+                        for idx, num_val in numeric_s.items():
+                            if num_val < lower_bound or num_val > upper_bound:
+                                raw_idx = int(df.at[idx, "_raw_row_idx"])
+                                raw_val = raw_df.at[raw_idx, col]
                                 flagged_for_review.append(
                                     {
                                         "row_index": int(idx) + 1,
                                         "column": col_str,
-                                        "original_value": val,
+                                        "original_value": raw_val,
                                         "reason": "possible outlier, review before including in analysis",
                                     }
                                 )
@@ -420,22 +443,22 @@ class DataAgent:
         columns_info: List[Dict[str, Any]] = []
 
         # Detect structural columns used for category-aware imputation
-        cat_col_name: Optional[str] = next(
-            (
-                str(c)
-                for c in df.columns
-                if any(kw in str(c).lower() for kw in ["product", "category", "item"])
-            ),
-            None,
-        )
         price_col_name: Optional[str] = next(
             (
                 str(c)
                 for c in df.columns
-                if any(kw in str(c).lower() for kw in ["unit_price", "price"])
+                if c != "_raw_row_idx" and any(kw in str(c).lower() for kw in ["unit_price", "price"])
             ),
             None,
         )
+        cat_col_name: Optional[str] = next(
+            (
+                str(c)
+                for c in df.columns
+                if c != "_raw_row_idx" and any(kw in str(c).lower() for kw in ["product", "category", "item"])
+            ),
+            None,
+        ) if price_col_name else None
 
         # Pre-compute per-category price medians for inference (only if both cols exist)
         cat_price_medians: Dict[str, float] = {}
@@ -456,7 +479,7 @@ class DataAgent:
         #   { col_str -> { category_value -> median } }
         cat_numeric_medians: Dict[str, Dict[str, float]] = {}
         if cat_col_name:
-            for col in df.columns:
+            for col in [c for c in df.columns if c != "_raw_row_idx"]:
                 col_str = str(col)
                 if col_str == cat_col_name:
                     continue
@@ -541,7 +564,7 @@ class DataAgent:
                         .to_dict()
                     )
                     cat_price_medians = {str(k): float(v) for k, v in grp_update.items()}
-                    for col in df.columns:
+                    for col in [c for c in df.columns if c != "_raw_row_idx"]:
                         col_str = str(col)
                         if col_str == cat_col_name:
                             continue
@@ -555,7 +578,7 @@ class DataAgent:
                             cat_numeric_medians[col_str] = {str(k): float(v) for k, v in grp_medians.items()}
 
         # ---- Pass 2: all other columns ----
-        for col in df.columns:
+        for col in [c for c in df.columns if c != "_raw_row_idx"]:
             col_str = str(col)
 
             # Already handled above
@@ -651,7 +674,9 @@ class DataAgent:
                                   for row_cat in [str(df.at[idx, cat_col_name]) if cat_col_name and pd.notna(df.at[idx, cat_col_name]) else None]
                                   if row_cat)
                     imputation_strategy = (
-                        "category-median (high confidence)" if has_cat else "overall-median (low confidence — category unknown)"
+                        "category-median (high confidence)"
+                        if has_cat
+                        else ("median" if not cat_col_name else "overall-median (low confidence — category unknown)")
                     )
 
                     # Cast column to clean numeric dtype
@@ -695,6 +720,9 @@ class DataAgent:
                     "imputation_strategy": imputation_strategy,
                 }
             )
+
+        if "_raw_row_idx" in df.columns:
+            df.drop(columns=["_raw_row_idx"], inplace=True)
 
 
         cleaned_rows = int(len(df))
