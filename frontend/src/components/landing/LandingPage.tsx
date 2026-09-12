@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import ArchitectureWorkflow from '../ArchitectureWorkflow'
 import { ThemeToggle } from '../ThemeToggle'
 import { useTheme } from '../../context/ThemeContext'
@@ -8,6 +8,123 @@ interface LandingPageProps {
   backendOnline?: boolean | null
   hasData?: boolean
   activeFileName?: string
+}
+
+/* ── Subtle CSS-generated Noise Pattern (No image file) ────────────── */
+const NoiseOverlay: React.FC<{ isDark: boolean }> = ({ isDark }) => (
+  <div
+    aria-hidden="true"
+    className="pointer-events-none fixed inset-0 z-30 select-none"
+    style={{
+      opacity: isDark ? 0.032 : 0.02,
+      backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
+      backgroundRepeat: 'repeat',
+    }}
+  />
+)
+
+/* ── Subtle Magnetic Hover Button ──────────────────────────────────── */
+interface MagneticButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  children: React.ReactNode
+  maxShift?: number
+  className?: string
+}
+
+const MagneticButton: React.FC<MagneticButtonProps> = ({
+  children,
+  maxShift = 6,
+  className = '',
+  onMouseMove,
+  onMouseLeave,
+  style,
+  ...props
+}) => {
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const [isHovered, setIsHovered] = useState(false)
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!btnRef.current) return
+    const rect = btnRef.current.getBoundingClientRect()
+    const centerX = rect.left + rect.width / 2
+    const centerY = rect.top + rect.height / 2
+    const distX = e.clientX - centerX
+    const distY = e.clientY - centerY
+
+    const shiftX = Math.max(-maxShift, Math.min(maxShift, distX * 0.18))
+    const shiftY = Math.max(-maxShift, Math.min(maxShift, distY * 0.18))
+    setOffset({ x: shiftX, y: shiftY })
+    if (onMouseMove) onMouseMove(e)
+  }
+
+  const handleMouseEnter = () => {
+    setIsHovered(true)
+  }
+
+  const handleMouseLeave = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setIsHovered(false)
+    setOffset({ x: 0, y: 0 })
+    if (onMouseLeave) onMouseLeave(e)
+  }
+
+  return (
+    <button
+      ref={btnRef}
+      onMouseEnter={handleMouseEnter}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      style={{
+        transform: `translate3d(${offset.x}px, ${offset.y}px, 0)`,
+        transition: isHovered
+          ? 'transform 0.08s ease-out'
+          : 'transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.2s, box-shadow 0.2s',
+        willChange: 'transform',
+        ...style,
+      }}
+      className={className}
+      {...props}
+    >
+      {children}
+    </button>
+  )
+}
+
+/* ── Scroll-Triggered Reveal Component ─────────────────────────────── */
+const RevealOnScroll: React.FC<{ children: React.ReactNode; delayMs?: number; className?: string }> = ({
+  children,
+  delayMs = 0,
+  className = '',
+}) => {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true)
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -30px 0px' }
+    )
+    if (ref.current) observer.observe(ref.current)
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        transitionDuration: '320ms',
+        transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        transitionDelay: `${delayMs}ms`,
+      }}
+      className={`transition-all ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'} ${className}`}
+    >
+      {children}
+    </div>
+  )
 }
 
 const TECH_STACK = [
@@ -47,36 +164,49 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 }) => {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
-  const [liveOnline, setLiveOnline] = useState<boolean | null>(backendOnline ?? null)
+
+  /* Genuine measured round-trip latency to backend /health */
+  const [measuredLatency, setMeasuredLatency] = useState<number | null>(null)
 
   useEffect(() => {
-    if (backendOnline !== undefined && backendOnline !== null) setLiveOnline(backendOnline)
-  }, [backendOnline])
-
-  useEffect(() => {
-    let mounted = true
-    const check = async () => {
+    let isMounted = true
+    const pingHealth = async () => {
+      const t0 = performance.now()
       try {
-        const ctrl = new AbortController()
-        const t = setTimeout(() => ctrl.abort(), 2000)
-        let ok = false
-        try { const r = await fetch('http://localhost:8000/health', { signal: ctrl.signal }); ok = r.ok }
-        catch { try { const r2 = await fetch('http://127.0.0.1:8000/health', { signal: ctrl.signal }); ok = r2.ok } catch { ok = false } }
-        finally { clearTimeout(t) }
-        if (mounted) setLiveOnline(ok)
-      } catch { if (mounted) setLiveOnline(false) }
+        const res = await fetch('http://localhost:8000/health')
+        if (res.ok && isMounted) {
+          const t1 = performance.now()
+          setMeasuredLatency(Math.max(1, Math.round(t1 - t0)))
+        }
+      } catch {
+        try {
+          const res2 = await fetch('http://127.0.0.1:8000/health')
+          if (res2.ok && isMounted) {
+            const t1 = performance.now()
+            setMeasuredLatency(Math.max(1, Math.round(t1 - t0)))
+          }
+        } catch {
+          if (isMounted) setMeasuredLatency(null)
+        }
+      }
     }
-    check()
-    const iv = setInterval(check, 3000)
-    return () => { mounted = false; clearInterval(iv) }
+    pingHealth()
+    const interval = setInterval(pingHealth, 10000)
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+    }
   }, [])
 
-  const statusText = liveOnline === true ? 'SYSTEM ONLINE' : liveOnline === false ? 'OFFLINE' : 'CONNECTING'
+  const statusText = backendOnline === true ? 'SYSTEM ONLINE' : backendOnline === false ? 'OFFLINE' : 'CONNECTING'
 
   return (
-    <div className={`min-h-screen w-full antialiased flex flex-col transition-colors duration-200 ${
+    <div className={`relative min-h-screen w-full antialiased flex flex-col transition-colors duration-200 ${
       isDark ? 'bg-black text-white selection:bg-white selection:text-black' : 'bg-[#fcfcfd] text-neutral-900 selection:bg-black selection:text-white'
     }`}>
+
+      {/* ── Subtle CSS Noise/Grain Texture Overlay ─────────────────── */}
+      <NoiseOverlay isDark={isDark} />
 
       {/* ── Nav ──────────────────────────────────────────────────────── */}
       <header className={`sticky top-0 z-50 w-full backdrop-blur-md border-b transition-colors ${
@@ -89,7 +219,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <div className={`w-6 h-6 border flex items-center justify-center rounded-sm ${
               isDark ? 'border-white/40 bg-white/10' : 'border-black/30 bg-black/5'
             }`}>
-              <span className={`w-2.5 h-2.5 rounded-xs ${isDark ? 'bg-white' : 'bg-black'}`} />
+              <span
+                className="w-2.5 h-2.5 rounded-xs"
+                style={{ backgroundColor: isDark ? '#ffffff' : '#000000' }}
+              />
             </div>
             <span className={`text-[14px] font-bold tracking-tight select-none ${
               isDark ? 'text-white' : 'text-neutral-950'
@@ -113,41 +246,53 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             ))}
           </nav>
 
-          {/* Right Actions: Status + Theme Toggle + Launch */}
+          {/* Right Actions: Status + Latency + Theme Toggle + Launch */}
           <div className="flex items-center gap-3 sm:gap-4">
             <div className={`hidden sm:flex items-center gap-2 px-2.5 py-1 border rounded ${
               isDark ? 'border-white/15 bg-white/[0.04]' : 'border-black/10 bg-black/[0.03]'
             }`}>
               <span
-                className={`w-2 h-2 rounded-full ${
-                  liveOnline === true
-                    ? (isDark ? 'bg-white shadow-[0_0_8px_#fff]' : 'bg-black shadow-[0_0_8px_rgba(0,0,0,0.4)]')
-                    : liveOnline === false
-                    ? 'bg-red-500'
-                    : 'bg-neutral-400 animate-pulse'
-                }`}
+                className="w-2 h-2 rounded-full"
+                style={{
+                  backgroundColor:
+                    backendOnline === true
+                      ? isDark
+                        ? '#ffffff'
+                        : '#000000'
+                      : backendOnline === false
+                      ? '#ef4444'
+                      : '#a3a3a3',
+                  boxShadow:
+                    backendOnline === true
+                      ? isDark
+                        ? '0 0 8px #ffffff'
+                        : '0 0 8px rgba(0,0,0,0.3)'
+                      : 'none',
+                }}
               />
               <span className={`text-[11px] font-mono tracking-wider ${
                 isDark ? 'text-white/80' : 'text-neutral-700'
               }`}>
-                {statusText}
+                {statusText} {measuredLatency !== null ? `· ${measuredLatency}ms` : ''}
               </span>
             </div>
 
             {/* Theme Toggle Button */}
             <ThemeToggle />
 
-            <button
+            <MagneticButton
               onClick={onLaunch}
               id="landing-nav-launch-btn"
-              className={`h-8 px-4 text-[13px] font-semibold rounded transition-all cursor-pointer ${
-                isDark
-                  ? 'bg-white text-black hover:bg-neutral-200'
-                  : 'bg-black text-white hover:bg-neutral-800'
-              }`}
+              maxShift={4}
+              className="btn-launch-primary h-8 px-4 text-[13px] font-semibold rounded"
+              style={{
+                backgroundColor: isDark ? '#ffffff' : '#000000',
+                color: isDark ? '#000000' : '#ffffff',
+                border: isDark ? '1px solid #ffffff' : '1px solid #000000',
+              }}
             >
               {hasData ? 'Resume Workspace →' : 'Launch →'}
-            </button>
+            </MagneticButton>
           </div>
         </div>
       </header>
@@ -159,7 +304,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className={`inline-flex items-center gap-2.5 mb-8 px-4 py-1.5 rounded-full border ${
           isDark ? 'border-white/20 bg-white/[0.06] text-white/90' : 'border-black/15 bg-black/[0.04] text-neutral-800'
         }`}>
-          <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isDark ? 'bg-white' : 'bg-black'}`} />
+          <span
+            className="w-1.5 h-1.5 rounded-full animate-pulse"
+            style={{ backgroundColor: isDark ? '#ffffff' : '#000000' }}
+          />
           <span className="text-[12px] font-mono tracking-wide">
             Autonomous Multi-Agent Business Intelligence
           </span>
@@ -181,19 +329,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           governed by an audited single source of truth with zero hallucinations.
         </p>
 
-        {/* CTAs */}
+        {/* CTAs with Magnetic Hover Effect */}
         <div className="flex flex-col sm:flex-row items-center gap-4">
-          <button
+          <MagneticButton
             onClick={onLaunch}
             id="hero-launch-btn"
-            className={`h-12 px-8 text-[15px] font-bold rounded-lg transition-all cursor-pointer ${
-              isDark
-                ? 'bg-white text-black hover:bg-neutral-200 shadow-[0_0_40px_rgba(255,255,255,0.15)]'
-                : 'bg-black text-white hover:bg-neutral-800 shadow-[0_4px_20px_rgba(0,0,0,0.15)]'
-            }`}
+            maxShift={7}
+            className="btn-launch-primary h-12 px-8 text-[15px] font-bold rounded-lg"
+            style={{
+              backgroundColor: isDark ? '#ffffff' : '#000000',
+              color: isDark ? '#000000' : '#ffffff',
+              border: isDark ? '1px solid #ffffff' : '1px solid #000000',
+              boxShadow: isDark
+                ? '0 0 35px rgba(255, 255, 255, 0.22)'
+                : '0 4px 20px rgba(0, 0, 0, 0.18)',
+            }}
           >
             {hasData ? 'Resume Active Workspace →' : 'Launch Application →'}
-          </button>
+          </MagneticButton>
+
           <a
             href="#how-it-works"
             className={`h-12 px-8 text-[15px] font-medium border rounded-lg transition-all flex items-center justify-center ${
@@ -206,9 +360,38 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </a>
         </div>
 
+        {/* Live Telemetry Strip — Genuine Live Measured Stat */}
+        <div className={`mt-8 inline-flex flex-wrap items-center justify-center gap-3 sm:gap-6 px-4 py-2 rounded-full border text-[11px] font-mono transition-colors ${
+          isDark ? 'border-white/15 bg-white/[0.03] text-white/75' : 'border-black/10 bg-black/[0.03] text-neutral-700'
+        }`}>
+          <div className="flex items-center gap-2">
+            <span
+              className="w-2 h-2 rounded-full"
+              style={{
+                backgroundColor: backendOnline ? (isDark ? '#ffffff' : '#000000') : '#a3a3a3',
+                boxShadow: backendOnline && isDark ? '0 0 8px #ffffff' : 'none',
+              }}
+            />
+            <span>BACKEND: {backendOnline ? 'ONLINE' : 'CONNECTING'}</span>
+          </div>
+          <span className={isDark ? 'text-white/20' : 'text-black/20'}>·</span>
+          <div>
+            <span>SYSTEM LATENCY: </span>
+            {measuredLatency !== null ? (
+              <strong className={isDark ? 'text-white' : 'text-black'}>{measuredLatency}ms (live)</strong>
+            ) : (
+              <span>MEASURING...</span>
+            )}
+          </div>
+          <span className={isDark ? 'text-white/20' : 'text-black/20'}>·</span>
+          <div>
+            <span>PIPELINE: 6 AGENTS READY</span>
+          </div>
+        </div>
+
         {/* Caption */}
-        <p className={`mt-8 text-[12px] font-mono tracking-wider ${
-          isDark ? 'text-white/50' : 'text-neutral-400'
+        <p className={`mt-6 text-[12px] font-mono tracking-wider ${
+          isDark ? 'text-white/50' : 'text-neutral-500'
         }`}>
           FASTAPI · LANGGRAPH · ANTHROPIC CLAUDE · RECHARTS · SQLITE
         </p>
@@ -218,7 +401,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className={`mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-lg border text-[13px] font-mono ${
             isDark ? 'border-white/20 bg-white/[0.05] text-white/90' : 'border-black/15 bg-black/[0.03] text-neutral-900'
           }`}>
-            <span className={`w-2 h-2 rounded-full ${isDark ? 'bg-white' : 'bg-black'}`} />
+            <span
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: isDark ? '#ffffff' : '#000000' }}
+            />
             <span>Active Dataset: <strong className="underline">{activeFileName}</strong></span>
           </div>
         )}
@@ -234,7 +420,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="max-w-6xl mx-auto">
 
           {/* Section Header */}
-          <div className="mb-12 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <RevealOnScroll className="mb-12 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div>
               <p className={`text-[11px] font-mono tracking-widest uppercase mb-2 ${
                 isDark ? 'text-white/60' : 'text-neutral-500'
@@ -251,29 +437,29 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <div className={`inline-flex items-center gap-2 px-3 py-1.5 border rounded-md shrink-0 ${
               isDark ? 'border-white/20 bg-white/[0.04]' : 'border-black/15 bg-black/[0.03]'
             }`}>
-              <span className={`w-2 h-2 rounded-full ${isDark ? 'bg-white' : 'bg-black'}`} />
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: isDark ? '#ffffff' : '#000000' }}
+              />
               <span className={`text-[12px] font-mono ${isDark ? 'text-white/80' : 'text-neutral-800'}`}>
                 8 production modules
               </span>
             </div>
-          </div>
+          </RevealOnScroll>
 
           {/* Grid */}
           <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border ${
             isDark ? 'border-white/15 bg-black' : 'border-black/10 bg-white shadow-sm'
           }`}>
             {TECH_STACK.map((t, i) => (
-              <div
+              <RevealOnScroll
                 key={t.name}
+                delayMs={Math.min(i * 40, 200)}
                 className={`group relative p-6 border-b sm:border-r transition-colors last:border-b-0 sm:last:border-r-0 ${
                   isDark
                     ? 'border-white/15 hover:bg-white/[0.03]'
                     : 'border-black/10 hover:bg-black/[0.02]'
                 }`}
-                style={{
-                  borderRight: (i + 1) % 4 === 0 ? 'none' : undefined,
-                  borderBottom: i >= 4 ? 'none' : undefined,
-                }}
               >
                 <div className="flex items-center justify-between mb-3">
                   <span className={`text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-neutral-900'}`}>
@@ -288,7 +474,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <p className={`text-[13px] leading-relaxed ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>
                   {t.role}
                 </p>
-              </div>
+              </RevealOnScroll>
             ))}
           </div>
         </div>
@@ -301,7 +487,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="max-w-6xl mx-auto">
 
           {/* Header */}
-          <div className="mb-12">
+          <RevealOnScroll className="mb-12">
             <p className={`text-[11px] font-mono tracking-widest uppercase mb-2 ${
               isDark ? 'text-white/60' : 'text-neutral-500'
             }`}>
@@ -313,15 +499,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Engineered for mathematical truth,{' '}
               <span className={isDark ? 'text-white/50' : 'text-neutral-500'}>not vanity metrics.</span>
             </h2>
-          </div>
+          </RevealOnScroll>
 
           {/* 3-column grid */}
           <div className={`grid grid-cols-1 md:grid-cols-3 border ${
             isDark ? 'border-white/15 bg-black' : 'border-black/10 bg-white shadow-sm'
           }`}>
-            {PRINCIPLES.map((p) => (
-              <div
+            {PRINCIPLES.map((p, i) => (
+              <RevealOnScroll
                 key={p.label}
+                delayMs={i * 80}
                 className={`group p-8 transition-colors border-b md:border-b-0 md:border-r last:border-b-0 md:last:border-r-0 ${
                   isDark
                     ? 'border-white/15 hover:bg-white/[0.03]'
@@ -334,7 +521,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   }`}>
                     [{p.label}]
                   </span>
-                  <span className={`w-1.5 h-1.5 rounded-full ${isDark ? 'bg-white' : 'bg-black'}`} />
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: isDark ? '#ffffff' : '#000000' }}
+                  />
                 </div>
                 <h3 className={`text-lg font-bold mb-3 tracking-tight ${isDark ? 'text-white' : 'text-neutral-950'}`}>
                   {p.title}
@@ -342,7 +532,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <p className={`text-[14px] leading-relaxed ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>
                   {p.body}
                 </p>
-              </div>
+              </RevealOnScroll>
             ))}
           </div>
         </div>
@@ -353,7 +543,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         isDark ? 'border-white/15 bg-black' : 'border-black/10 bg-white'
       }`}>
         <div className="max-w-6xl mx-auto">
-          <div className={`border p-12 md:p-16 flex flex-col items-center text-center gap-6 rounded-lg ${
+          <RevealOnScroll className={`border p-12 md:p-16 flex flex-col items-center text-center gap-6 rounded-lg ${
             isDark ? 'border-white/15 bg-white/[0.015]' : 'border-black/10 bg-[#fafafc] shadow-sm'
           }`}>
             <span className={`text-[11px] font-mono tracking-widest uppercase ${
@@ -372,24 +562,29 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Upload any CSV or Excel file. The six-agent pipeline coordinates immediately with zero complex configuration.
             </p>
 
-            <button
+            <MagneticButton
               onClick={onLaunch}
               id="cta-launch-btn"
-              className={`mt-3 h-13 px-10 text-[15px] font-bold rounded-lg transition-all cursor-pointer ${
-                isDark
-                  ? 'bg-white text-black hover:bg-neutral-200 shadow-[0_0_50px_rgba(255,255,255,0.18)]'
-                  : 'bg-black text-white hover:bg-neutral-800 shadow-[0_4px_24px_rgba(0,0,0,0.15)]'
-              }`}
+              maxShift={7}
+              className="btn-launch-primary mt-3 h-13 px-10 text-[15px] font-bold rounded-lg cursor-pointer"
+              style={{
+                backgroundColor: isDark ? '#ffffff' : '#000000',
+                color: isDark ? '#000000' : '#ffffff',
+                border: isDark ? '1px solid #ffffff' : '1px solid #000000',
+                boxShadow: isDark
+                  ? '0 0 50px rgba(255, 255, 255, 0.25)'
+                  : '0 4px 24px rgba(0, 0, 0, 0.18)',
+              }}
             >
               Launch Analytics Workspace →
-            </button>
+            </MagneticButton>
 
             {hasData && activeFileName && (
               <p className={`text-[12px] font-mono ${isDark ? 'text-white/60' : 'text-neutral-500'}`}>
                 Current dataset: <strong className={isDark ? 'text-white' : 'text-neutral-900'}>{activeFileName}</strong>
               </p>
             )}
-          </div>
+          </RevealOnScroll>
         </div>
       </section>
 
@@ -399,7 +594,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       }`}>
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className={`w-2 h-2 rounded-full ${isDark ? 'bg-white' : 'bg-black'}`} />
+            <span
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: isDark ? '#ffffff' : '#000000' }}
+            />
             <span className={`text-[13px] font-medium ${isDark ? 'text-white/70' : 'text-neutral-700'}`}>
               AgentInsight AI · Autonomous Multi-Agent BI
             </span>
@@ -423,3 +621,4 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 }
 
 export default LandingPage
+

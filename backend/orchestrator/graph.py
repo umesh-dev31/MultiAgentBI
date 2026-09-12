@@ -23,6 +23,7 @@ class PipelineState(TypedDict):
     validated_df: Optional[Any]
     dataset_summary: Optional[Dict[str, Any]]
     data_quality_report: Optional[Dict[str, Any]]
+    data_health_score: Optional[Dict[str, Any]]
     eda_result: Optional[Dict[str, Any]]
     ml_result: Optional[Dict[str, Any]]
     sql_result: Optional[Dict[str, Any]]
@@ -53,7 +54,29 @@ class Orchestrator:
         self.visualization_agent = visualization_agent or VisualizationAgent()
         self.insight_agent = insight_agent or InsightAgent()
 
+        self.event_callback = None
         self.graph = self._build_graph()
+
+    def _notify(
+        self,
+        node: str,
+        status: str,
+        duration_ms: float = 0.0,
+        details: str = "",
+        witty_label: str = "",
+    ):
+        """Dispatches real-time stage updates to the registered event callback."""
+        if hasattr(self, "event_callback") and self.event_callback:
+            try:
+                self.event_callback(
+                    node=node,
+                    status=status,
+                    duration_ms=duration_ms,
+                    details=details,
+                    witty_label=witty_label,
+                )
+            except Exception:
+                pass
 
     def _create_log(
         self, step_name: str, duration_sec: float, status: str, details: str
@@ -75,13 +98,32 @@ class Orchestrator:
     # =========================================================================
     def data_cleaning_node(self, state: PipelineState) -> Dict[str, Any]:
         file_path = state.get("file_path")
-        print(f"\n\033[94m[LangGraph Orchestrator] ─── Step 1/6: Data Cleaning Node (DataAgent) ───\033[0m")
+        print(f"\n\033[94m[LangGraph Orchestrator] --- Step 1/6: Data Cleaning Node (DataAgent) ---\033[0m")
+        approx_rows = None
+        if file_path and os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    approx_rows = max(0, sum(1 for _ in f) - 1)
+            except Exception:
+                pass
+        start_witty = f"Scrubbing {approx_rows} rows & normalizing types..." if approx_rows is not None else "Scrubbing raw rows & normalizing data types..."
+        self._notify(
+            node="data_cleaning_node",
+            status="started",
+            witty_label=start_witty,
+        )
         t0 = time.time()
 
         if not file_path or not os.path.exists(file_path):
             elapsed = time.time() - t0
             err_msg = f"File not found or invalid path: {file_path}"
             print(f"\033[91m[LangGraph Orchestrator] ❌ {err_msg}\033[0m")
+            self._notify(
+                node="data_cleaning_node",
+                status="failed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=err_msg,
+            )
             return {
                 "errors": [err_msg],
                 "current_step": "data_cleaning",
@@ -100,10 +142,19 @@ class Orchestrator:
             details = f"Cleaned {rows_in} rows -> {rows_out} rows. {flagged} items flagged for review."
             print(f"\033[92m[LangGraph Orchestrator] ✓ Data Cleaning completed in {elapsed:.2f}s ({details})\033[0m")
 
+            self._notify(
+                node="data_cleaning_node",
+                status="completed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=details,
+                witty_label=f"Cleaned {rows_out} rows, zero schema casualties",
+            )
+
             return {
                 "cleaned_df": cleaned_df,
                 "dataset_summary": result,
                 "data_quality_report": quality_report,
+                "data_health_score": result.get("data_health_score"),
                 "current_step": "data_cleaning",
                 "execution_logs": self._create_log("Data Cleaning", elapsed, "success", details),
             }
@@ -111,6 +162,12 @@ class Orchestrator:
             elapsed = time.time() - t0
             err_msg = f"Data cleaning failed: {str(exc)}"
             print(f"\033[91m[LangGraph Orchestrator] ❌ {err_msg}\033[0m")
+            self._notify(
+                node="data_cleaning_node",
+                status="failed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=err_msg,
+            )
             return {
                 "errors": [err_msg],
                 "current_step": "data_cleaning",
@@ -121,7 +178,12 @@ class Orchestrator:
     # Node 2: Validation Gate (Gating check)
     # =========================================================================
     def validation_node(self, state: PipelineState) -> Dict[str, Any]:
-        print(f"\033[94m[LangGraph Orchestrator] ─── Step 2/6: Validation Gate (Quality Audit) ───\033[0m")
+        print(f"\033[94m[LangGraph Orchestrator] --- Step 2/6: Validation Gate (Quality Audit) ---\033[0m")
+        self._notify(
+            node="validation_node",
+            status="started",
+            witty_label="Auditing quality thresholds & screening outliers...",
+        )
         t0 = time.time()
         cleaned_df = state.get("cleaned_df")
         quality_report = state.get("data_quality_report")
@@ -130,6 +192,12 @@ class Orchestrator:
             elapsed = time.time() - t0
             err_msg = "Validation failed: Dataset is empty after cleaning."
             print(f"\033[91m[LangGraph Orchestrator] ❌ {err_msg}\033[0m")
+            self._notify(
+                node="validation_node",
+                status="failed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=err_msg,
+            )
             return {
                 "errors": [err_msg],
                 "current_step": "validation",
@@ -141,6 +209,12 @@ class Orchestrator:
             elapsed = time.time() - t0
             err_msg = f"Validation failed: Insufficient data points ({len(cleaned_df)} rows). At least 3 rows required."
             print(f"\033[91m[LangGraph Orchestrator] ❌ {err_msg}\033[0m")
+            self._notify(
+                node="validation_node",
+                status="failed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=err_msg,
+            )
             return {
                 "errors": [err_msg],
                 "current_step": "validation",
@@ -192,6 +266,12 @@ class Orchestrator:
             elapsed = time.time() - t0
             err_msg = "Validation failed: 100% of rows flagged as critical outliers or invalid numbers."
             print(f"\033[91m[LangGraph Orchestrator] ❌ {err_msg}\033[0m")
+            self._notify(
+                node="validation_node",
+                status="failed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=err_msg,
+            )
             return {
                 "errors": [err_msg],
                 "current_step": "validation",
@@ -201,6 +281,14 @@ class Orchestrator:
         elapsed = time.time() - t0
         details = f"Validation passed! Validated subset: {len(validated_df)} rows ({len(excluded_indices)} excluded)."
         print(f"\033[92m[LangGraph Orchestrator] ✓ {details} in {elapsed:.2f}s\033[0m")
+
+        self._notify(
+            node="validation_node",
+            status="completed",
+            duration_ms=round(elapsed * 1000, 1),
+            details=details,
+            witty_label="Integrity checks passed, clean analytical subset ready",
+        )
 
         return {
             "validated_df": validated_df,
@@ -220,7 +308,12 @@ class Orchestrator:
     # Node 3: Exploratory Data Analysis (EDAAgent) - Runs in parallel with ML
     # =========================================================================
     def eda_node(self, state: PipelineState) -> Dict[str, Any]:
-        print(f"\033[94m[LangGraph Orchestrator] ─── Step 3/6: EDA Node (EDAAgent) ───\033[0m")
+        print(f"\033[94m[LangGraph Orchestrator] --- Step 3/6: EDA Node (EDAAgent) ---\033[0m")
+        self._notify(
+            node="eda_node",
+            status="started",
+            witty_label="Unearthing correlations, trends & statistical signatures...",
+        )
         t0 = time.time()
         try:
             target_df = state.get("validated_df") if state.get("validated_df") is not None else state.get("cleaned_df")
@@ -231,6 +324,15 @@ class Orchestrator:
             patterns_cnt = len(eda_result.get("notable_patterns", []))
             details = f"EDA generated: {patterns_cnt} notable patterns, {len(eda_result.get('monthly_trend', []))} monthly trend points."
             print(f"\033[92m[LangGraph Orchestrator] ✓ EDA Node completed in {elapsed:.2f}s ({details})\033[0m")
+
+            self._notify(
+                node="eda_node",
+                status="completed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=details,
+                witty_label="Descriptive statistics & notable patterns uncovered",
+            )
+
             return {
                 "eda_result": eda_result,
                 "execution_logs": self._create_log("EDA Agent", elapsed, "success", details),
@@ -239,6 +341,12 @@ class Orchestrator:
             elapsed = time.time() - t0
             err_msg = f"EDA Agent error: {str(exc)}"
             print(f"\033[91m[LangGraph Orchestrator] ❌ {err_msg}\033[0m")
+            self._notify(
+                node="eda_node",
+                status="failed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=err_msg,
+            )
             return {
                 "errors": [err_msg],
                 "execution_logs": self._create_log("EDA Agent", elapsed, "failed", err_msg),
@@ -248,7 +356,12 @@ class Orchestrator:
     # Node 4: Machine Learning & Predictive Analytics (MLAgent) - Runs in parallel with EDA
     # =========================================================================
     def ml_node(self, state: PipelineState) -> Dict[str, Any]:
-        print(f"\033[94m[LangGraph Orchestrator] ─── Step 4/6: ML Node (MLAgent) ───\033[0m")
+        print(f"\033[94m[LangGraph Orchestrator] --- Step 4/6: ML Node (MLAgent) ---\033[0m")
+        self._notify(
+            node="ml_node",
+            status="started",
+            witty_label="Teaching the model what's normal & catching anomalies...",
+        )
         t0 = time.time()
         try:
             target_df = state.get("validated_df") if state.get("validated_df") is not None else state.get("cleaned_df")
@@ -260,6 +373,15 @@ class Orchestrator:
             trend_dir = ml_result.get("forecast", {}).get("trend_direction", "N/A")
             details = f"ML completed: {anom_cnt} anomalies detected via IsolationForest; Trend direction: {trend_dir}."
             print(f"\033[92m[LangGraph Orchestrator] ✓ ML Node completed in {elapsed:.2f}s ({details})\033[0m")
+
+            self._notify(
+                node="ml_node",
+                status="completed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=details,
+                witty_label="IsolationForest outliers isolated & forecast computed",
+            )
+
             return {
                 "ml_result": ml_result,
                 "execution_logs": self._create_log("ML Agent", elapsed, "success", details),
@@ -268,6 +390,12 @@ class Orchestrator:
             elapsed = time.time() - t0
             err_msg = f"ML Agent error: {str(exc)}"
             print(f"\033[91m[LangGraph Orchestrator] ❌ {err_msg}\033[0m")
+            self._notify(
+                node="ml_node",
+                status="failed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=err_msg,
+            )
             return {
                 "errors": [err_msg],
                 "execution_logs": self._create_log("ML Agent", elapsed, "failed", err_msg),
@@ -277,7 +405,12 @@ class Orchestrator:
     # Node 5: Visualization Recommendations (VisualizationAgent)
     # =========================================================================
     def visualization_node(self, state: PipelineState) -> Dict[str, Any]:
-        print(f"\033[94m[LangGraph Orchestrator] ─── Step 5/6: Visualization Node (VisualizationAgent) ───\033[0m")
+        print(f"\033[94m[LangGraph Orchestrator] --- Step 5/6: Visualization Node (VisualizationAgent) ---\033[0m")
+        self._notify(
+            node="visualization_node",
+            status="started",
+            witty_label="Composing optimal chart blueprints & color palettes...",
+        )
         t0 = time.time()
         try:
             target_df = state.get("validated_df") if state.get("validated_df") is not None else state.get("cleaned_df")
@@ -290,6 +423,15 @@ class Orchestrator:
             charts_cnt = len(viz_res.get("charts", []))
             details = f"Visualization generated {charts_cnt} chart specs."
             print(f"\033[92m[LangGraph Orchestrator] ✓ Visualization Node completed in {elapsed:.2f}s ({details})\033[0m")
+
+            self._notify(
+                node="visualization_node",
+                status="completed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=details,
+                witty_label="Curated dynamic chart specifications generated",
+            )
+
             return {
                 "visualization_result": viz_res,
                 "current_step": "visualization",
@@ -299,6 +441,12 @@ class Orchestrator:
             elapsed = time.time() - t0
             err_msg = f"Visualization Agent error: {str(exc)}"
             print(f"\033[91m[LangGraph Orchestrator] ❌ {err_msg}\033[0m")
+            self._notify(
+                node="visualization_node",
+                status="failed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=err_msg,
+            )
             return {
                 "errors": [err_msg],
                 "current_step": "visualization",
@@ -309,7 +457,12 @@ class Orchestrator:
     # Node 6: Insight Synthesis & Suggested Questions (InsightAgent + SQLAgent)
     # =========================================================================
     def insight_node(self, state: PipelineState) -> Dict[str, Any]:
-        print(f"\033[94m[LangGraph Orchestrator] ─── Step 6/6: Insight Node (InsightAgent & SQLAgent) ───\033[0m")
+        print(f"\033[94m[LangGraph Orchestrator] --- Step 6/6: Insight Node (InsightAgent & SQLAgent) ---\033[0m")
+        self._notify(
+            node="insight_node",
+            status="started",
+            witty_label="Writing the executive briefing & business takeaways...",
+        )
         t0 = time.time()
         try:
             insight_res = self.insight_agent.generate_summary(
@@ -323,6 +476,15 @@ class Orchestrator:
             elapsed = time.time() - t0
             details = f"Executive briefing synthesized with LLM; {len(questions)} dynamic questions created."
             print(f"\033[92m[LangGraph Orchestrator] ✓ Insight Node completed in {elapsed:.2f}s ({details})\033[0m")
+
+            self._notify(
+                node="insight_node",
+                status="completed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=details,
+                witty_label="Strategic briefing synthesized with LLM",
+            )
+
             return {
                 "insight_result": insight_res,
                 "suggested_questions": questions,
@@ -333,6 +495,12 @@ class Orchestrator:
             elapsed = time.time() - t0
             err_msg = f"Insight Agent error: {str(exc)}"
             print(f"\033[91m[LangGraph Orchestrator] ❌ {err_msg}\033[0m")
+            self._notify(
+                node="insight_node",
+                status="failed",
+                duration_ms=round(elapsed * 1000, 1),
+                details=err_msg,
+            )
             return {
                 "errors": [err_msg],
                 "current_step": "insight",
@@ -399,9 +567,12 @@ class Orchestrator:
 
         return builder.compile()
 
-    def run_pipeline(self, file_path: str) -> PipelineState:
+    def run_pipeline(
+        self, file_path: str, event_callback: Optional[Any] = None
+    ) -> PipelineState:
         """Runs the entire multi-agent LangGraph pipeline from start to finish."""
         start_time = time.time()
+        self.event_callback = event_callback
         print("\n" + "=" * 70)
         print(f"\033[1m🚀 STARTING MULTI-AGENT BI PIPELINE (LANGGRAPH)\033[0m")
         print(f"Dataset File: {file_path}")
@@ -414,6 +585,7 @@ class Orchestrator:
             "validated_df": None,
             "dataset_summary": None,
             "data_quality_report": None,
+            "data_health_score": None,
             "eda_result": None,
             "ml_result": None,
             "sql_result": None,
@@ -425,7 +597,11 @@ class Orchestrator:
             "execution_logs": [],
         }
 
-        final_state = self.graph.invoke(initial_state)
+        try:
+            final_state = self.graph.invoke(initial_state)
+        finally:
+            self.event_callback = None
+
         total_sec = time.time() - start_time
         print("\n" + "=" * 70)
         if final_state.get("errors"):
@@ -439,3 +615,4 @@ class Orchestrator:
                 print(f"   • {log['step']:<20}: {log['duration_sec']}s [{log['status']}] - {log['details']}")
         print("=" * 70 + "\n")
         return final_state
+

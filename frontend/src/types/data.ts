@@ -32,9 +32,24 @@ export interface FlaggedIssue {
   reason: string
 }
 
+export interface DataHealthScore {
+  score: number
+  label: 'Needs Review' | 'Good' | 'Excellent' | string
+  color: 'red' | 'amber' | 'green' | string
+  penalties?: {
+    flagged_penalty: number
+    auto_fixed_penalty: number
+  }
+  total_flagged?: number
+  total_auto_fixed?: number
+}
+
 export interface DataQualityReport {
   auto_fixed: AutoFixedReport
   flagged_for_review: FlaggedIssue[]
+  health_score?: number
+  health_label?: string
+  data_health_score?: DataHealthScore
 }
 
 export interface NumericColumnStats {
@@ -88,6 +103,7 @@ export interface UploadResponse {
   columns: ColumnInfo[]
   cleaned_preview: CleanedRecord[]
   data_quality_report?: DataQualityReport
+  data_health_score?: DataHealthScore
   eda?: EDAResponse
 }
 
@@ -103,6 +119,7 @@ export interface PipelineRunResponse {
   filename: string
   dataset_summary: UploadResponse
   data_quality_report: DataQualityReport
+  data_health_score?: DataHealthScore
   eda_result: EDAResponse
   ml_result: any
   visualization_result: any

@@ -248,6 +248,38 @@ class TestDataAgent(unittest.TestCase):
         flagged = result["data_quality_report"]["flagged_for_review"]
         self.assertTrue(any(f["column"] == "order_date" and "2026-02-30" in str(f["original_value"]) for f in flagged))
 
+    def test_data_health_score_calculation(self):
+        # 1. Clean dataset: 0 flagged, 2 auto-fixes -> 100 - (0 + 1) = 99 (Excellent)
+        clean_health = self.agent._calculate_data_health_score(
+            auto_fixed_counts={"whitespace_trimmed": 2},
+            flagged_for_review=[],
+        )
+        self.assertEqual(clean_health["score"], 99)
+        self.assertEqual(clean_health["label"], "Excellent")
+        self.assertEqual(clean_health["color"], "green")
+
+        # 2. Messy dataset: 61 auto fixes (capped at 20), 17 flagged rows (17 points) -> 100 - 37 = 63 (Good)
+        messy_flagged = [{"row_index": i, "column": "col", "reason": "err"} for i in range(17)]
+        messy_health = self.agent._calculate_data_health_score(
+            auto_fixed_counts={"whitespace_trimmed": 50, "null_literals_converted": 11},
+            flagged_for_review=messy_flagged,
+        )
+        self.assertEqual(messy_health["score"], 63)
+        self.assertEqual(messy_health["label"], "Good")
+        self.assertEqual(messy_health["color"], "amber")
+        self.assertEqual(messy_health["penalties"]["auto_fixed_penalty"], 20.0)
+        self.assertEqual(messy_health["penalties"]["flagged_penalty"], 17.0)
+
+        # 3. Very degraded dataset: 50 flagged rows (capped at 40), 60 auto-fixes (capped at 20) -> 100 - 60 = 40 (Needs Review)
+        degraded_flagged = [{"row_index": i, "column": "col", "reason": "err"} for i in range(50)]
+        degraded_health = self.agent._calculate_data_health_score(
+            auto_fixed_counts={"whitespace_trimmed": 60},
+            flagged_for_review=degraded_flagged,
+        )
+        self.assertEqual(degraded_health["score"], 40)
+        self.assertEqual(degraded_health["label"], "Needs Review")
+        self.assertEqual(degraded_health["color"], "red")
+
 
 if __name__ == "__main__":
     unittest.main()

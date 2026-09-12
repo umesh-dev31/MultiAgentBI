@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
+import { DataHealthScoreGauge } from '../DataHealthScoreGauge'
 
-export const ExecutiveSummary = ({ summary, keyFinding, recommendation }) => {
+export const ExecutiveSummary = ({ summary, keyFinding, recommendation, dataHealthScore }) => {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = () => {
@@ -33,22 +34,27 @@ export const ExecutiveSummary = ({ summary, keyFinding, recommendation }) => {
           </div>
         </div>
 
-        <button
-          onClick={handleCopy}
-          className="self-start sm:self-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold transition cursor-pointer"
-        >
-          {copied ? (
-            <>
-              <span className="text-emerald-600 font-bold">✓</span>
-              <span className="text-emerald-700">Copied to Clipboard</span>
-            </>
-          ) : (
-            <>
-              <span>📋</span>
-              <span>Copy Briefing</span>
-            </>
+        <div className="flex items-center gap-3">
+          {dataHealthScore && (
+            <DataHealthScoreGauge healthScore={dataHealthScore} size="small" />
           )}
-        </button>
+          <button
+            onClick={handleCopy}
+            className="self-start sm:self-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold transition cursor-pointer"
+          >
+            {copied ? (
+              <>
+                <span className="text-emerald-600 font-bold">✓</span>
+                <span className="text-emerald-700">Copied to Clipboard</span>
+              </>
+            ) : (
+              <>
+                <span>📋</span>
+                <span>Copy Briefing</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Main Executive Summary Paragraph */}

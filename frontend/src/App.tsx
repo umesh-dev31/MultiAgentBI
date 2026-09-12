@@ -3,10 +3,7 @@ import { LandingPage } from './components/landing/LandingPage'
 import { DashboardLayout } from './components/dashboard/DashboardLayout'
 import { CenterCanvas } from './components/dashboard/CenterCanvas'
 import { UploadSection } from './components/upload/UploadSection'
-import { DatasetSummary } from './components/DatasetSummary'
-import { DataQualityReport } from './components/dataQuality/DataQualityReport'
-import { SchemaMissingValueTable } from './components/preview/SchemaMissingValueTable'
-import { CleanedDataPreview } from './components/preview/CleanedDataPreview'
+import { DataQualityView } from './components/DataQualityView'
 import { NotablePatterns } from './components/eda/NotablePatterns'
 import { EDASummarySection } from './components/eda/EDASummarySection'
 import { CategoricalDistributions } from './components/eda/CategoricalDistributions'
@@ -41,6 +38,7 @@ function App() {
   const [insightsResult, setInsightsResult] = useState<any>(null)
   const [suggestedQuestions, setSuggestedQuestions] = useState<any[] | null>(null)
   const [pipelineLogs, setPipelineLogs] = useState<PipelineExecutionLog[] | undefined>(undefined)
+  const [currentRunId, setCurrentRunId] = useState<string | undefined>(undefined)
 
   // Verify backend health on mount and periodically
   const checkHealth = async () => {
@@ -84,11 +82,14 @@ function App() {
     setActiveFileName(file.name)
     setPipelineLogs(undefined)
 
+    const runId = 'run_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9)
+    setCurrentRunId(runId)
+
     const formData = new FormData()
     formData.append('file', file)
 
     try {
-      const response = await fetch(`${BACKEND_URL}/api/pipeline/run`, {
+      const response = await fetch(`${BACKEND_URL}/api/pipeline/run?run_id=${runId}`, {
         method: 'POST',
         body: formData,
       })
@@ -119,8 +120,10 @@ function App() {
       }
       setInsightsResult(combinedInsights)
 
-      // Advance to quality tab
-      setActiveTab('quality')
+      // Brief grace period allowing the user to view all 6 stages marked "Done" on the checklist
+      setTimeout(() => {
+        setActiveTab('quality')
+      }, 1200)
     } catch (err) {
       setError(
         err instanceof Error
@@ -144,6 +147,7 @@ function App() {
     setInsightsResult(null)
     setSuggestedQuestions(null)
     setPipelineLogs(undefined)
+    setCurrentRunId(undefined)
     setEdaLoading(false)
     setError(null)
     setActiveFileName('')
@@ -201,6 +205,8 @@ function App() {
               onReset={handleReset}
               isExecutingPipeline={uploading}
               pipelineLogs={pipelineLogs}
+              runId={currentRunId}
+              backendUrl={BACKEND_URL}
             />
 
             {hasData && (
@@ -256,42 +262,16 @@ function App() {
 
         {/* ── TAB 2: DATA QUALITY ───────────────────────────────────── */}
         {activeTab === 'quality' && datasetResult && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            <div>
-              <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-                Data Quality & Schema
-              </h2>
-              <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                Automated cleaning audit — what was fixed, what needs your review.
-              </p>
-            </div>
-
-            <DatasetSummary
-              summary={datasetResult.summary}
-              shape={datasetResult.shape}
-              fileName={activeFileName}
-              onReset={handleReset}
-            />
-
-            {datasetResult.data_quality_report && (
-              <DataQualityReport report={datasetResult.data_quality_report} />
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: '5fr 7fr', gap: 20 }}>
-              <SchemaMissingValueTable columns={datasetResult.columns} />
-              <CleanedDataPreview
-                records={datasetResult.cleaned_preview}
-                columns={datasetResult.columns}
-                totalCleanedRows={datasetResult.summary.cleaned_rows}
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn-primary" onClick={() => setActiveTab('eda')}>
-                Proceed to Exploration →
-              </button>
-            </div>
-          </div>
+          <DataQualityView
+            summary={datasetResult.summary}
+            shape={datasetResult.shape}
+            fileName={activeFileName}
+            columns={datasetResult.columns}
+            cleanedPreview={datasetResult.cleaned_preview}
+            report={datasetResult.data_quality_report}
+            onReset={handleReset}
+            onProceed={() => setActiveTab('eda')}
+          />
         )}
 
         {/* ── TAB 3: EDA ────────────────────────────────────────────── */}
@@ -416,7 +396,13 @@ function App() {
                 Insight Agent
               </span>
             </div>
-            <BusinessSummaryView backendUrl={BACKEND_URL} disabled={!hasData} hasData={hasData} initialData={insightsResult} />
+            <BusinessSummaryView
+              backendUrl={BACKEND_URL}
+              disabled={!hasData}
+              hasData={hasData}
+              initialData={insightsResult}
+              dataHealthScore={datasetResult?.data_health_score || datasetResult?.data_quality_report?.data_health_score}
+            />
           </div>
         )}
 

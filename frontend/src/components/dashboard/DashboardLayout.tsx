@@ -109,7 +109,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         </div>
 
         {/* Center: breadcrumb / active tab label */}
-        <div style={{ flex: 1, padding: '0 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, padding: '0 18px', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Dashboard</span>
             <span style={{ color: 'var(--border-medium)' }}>›</span>

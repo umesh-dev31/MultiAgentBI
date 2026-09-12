@@ -1,12 +1,23 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { ExecutiveSummary } from './ExecutiveSummary'
 import { SuggestedCharts } from './SuggestedCharts'
+import { DataHealthScoreGauge } from '../DataHealthScoreGauge'
 
+/**
+  * @param {{
+  *   backendUrl: string,
+  *   disabled?: boolean,
+  *   hasData?: boolean,
+  *   initialData?: any,
+  *   dataHealthScore?: any
+  * }} props
+  */
 export const BusinessSummaryView = ({
   backendUrl,
   disabled = false,
   hasData = false,
   initialData = null,
+  dataHealthScore = undefined,
 }) => {
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState(initialData)
@@ -59,6 +70,9 @@ export const BusinessSummaryView = ({
           </p>
         </div>
         <div className="flex items-center gap-2.5">
+          {dataHealthScore && (
+            <DataHealthScoreGauge healthScore={dataHealthScore} size="small" />
+          )}
           <span className="px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold shadow-2xs">
             Visualization & Insight Agents
           </span>
@@ -107,6 +121,7 @@ export const BusinessSummaryView = ({
             summary={data.summary}
             keyFinding={data.key_finding}
             recommendation={data.recommendation}
+            dataHealthScore={dataHealthScore}
           />
 
           {/* 2. Suggested Charts (Generic Recharts Renderer) */}

@@ -6,6 +6,8 @@ interface PipelineProgressProps {
   isExecuting: boolean
   logs?: PipelineExecutionLog[]
   fileName?: string
+  runId?: string
+  backendUrl?: string
 }
 
 interface StepDefinition {
@@ -14,6 +16,15 @@ interface StepDefinition {
   agent: string
   idx: string
   description: string
+}
+
+const STEP_NODE_KEYS: Record<string, string[]> = {
+  'Data Cleaning': ['data_cleaning_node', 'data_cleaning'],
+  'Validation Gate': ['validation_node', 'validation'],
+  'EDA Analysis': ['eda_node', 'eda'],
+  'ML Analytics': ['ml_node', 'ml'],
+  'Visualization Selection': ['visualization_node', 'visualization'],
+  'Insight Generation': ['insight_node', 'insight'],
 }
 
 const PIPELINE_STEPS: StepDefinition[] = [
@@ -65,29 +76,44 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
   isExecuting,
   logs,
   fileName,
+  runId,
+  backendUrl = 'http://localhost:8000',
 }) => {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
-  const [simulatedStep, setSimulatedStep] = useState(0)
+  const [realStages, setRealStages] = useState<Record<string, { status: string; duration_ms?: number; details?: string; witty_label?: string }>>({})
 
+  // Authentic live status polling every 350ms tied directly to backend LangGraph execution
   useEffect(() => {
-    if (!isExecuting) {
-      setSimulatedStep(PIPELINE_STEPS.length)
+    if (!isExecuting || !runId) {
       return
     }
 
-    setSimulatedStep(0)
-    const interval = setInterval(() => {
-      setSimulatedStep((prev) => {
-        if (prev < PIPELINE_STEPS.length - 1) {
-          return prev + 1
-        }
-        return prev
-      })
-    }, 1200)
+    setRealStages({})
+    let isMounted = true
 
-    return () => clearInterval(interval)
-  }, [isExecuting])
+    const pollStatus = async () => {
+      try {
+        const res = await fetch(`${backendUrl}/api/pipeline/status/${runId}`)
+        if (res.ok && isMounted) {
+          const data = await res.json()
+          if (data.stages) {
+            setRealStages(data.stages)
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }
+
+    pollStatus()
+    const interval = setInterval(pollStatus, 350)
+
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+    }
+  }, [isExecuting, runId, backendUrl])
 
   const totalDuration = logs
     ? logs.reduce((acc, curr) => acc + (curr.duration_seconds || 0), 0)
@@ -149,8 +175,33 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
               step.name.toLowerCase().includes(l.step_name.toLowerCase())
           )
 
-          const isCompleted = !isExecuting || (logs && log) || idx < simulatedStep
-          const isCurrent = isExecuting && idx === simulatedStep
+          const nodeKeys = STEP_NODE_KEYS[step.name] || []
+          let nodeState: { status: string; duration_ms?: number; details?: string; witty_label?: string } | null = null
+          for (const k of nodeKeys) {
+            if (realStages[k]) {
+              nodeState = realStages[k]
+              break
+            }
+          }
+
+          const isBackendCompleted = nodeState?.status === 'completed'
+          const isBackendStarted = nodeState?.status === 'started'
+          const hasLog = Boolean(logs && log)
+
+          const isCompleted = !isExecuting || hasLog || isBackendCompleted
+          const isCurrent = isExecuting && isBackendStarted && !isCompleted
+
+          const durationDisplay = log
+            ? `${log.duration_seconds.toFixed(2)}s`
+            : nodeState?.duration_ms != null && nodeState.duration_ms > 0
+            ? `${(nodeState.duration_ms / 1000).toFixed(2)}s`
+            : null
+
+          const activeLabel = isCurrent
+            ? (nodeState?.witty_label || 'Executing stage...')
+            : null
+
+          const detailNote = log?.details || (isCompleted && nodeState?.witty_label ? nodeState.witty_label : nodeState?.details)
 
           return (
             <div
@@ -164,14 +215,14 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
                 <div
                   className={`w-7 h-7 rounded flex items-center justify-center text-xs font-mono font-bold shrink-0 transition-all ${
                     isCompleted && !isCurrent
-                      ? (isDark ? 'border border-white/30 bg-white/10 text-white' : 'border border-neutral-300 bg-neutral-100 text-neutral-900')
+                      ? (isDark ? 'border border-emerald-500/50 bg-emerald-500/15 text-emerald-400' : 'border border-emerald-600 bg-emerald-50 text-emerald-700')
                       : isCurrent
-                      ? (isDark ? 'border border-white bg-white text-black' : 'border border-black bg-black text-white')
+                      ? (isDark ? 'border border-white bg-white text-black ring-2 ring-white/20' : 'border border-black bg-black text-white ring-2 ring-black/10')
                       : (isDark ? 'border border-white/10 bg-white/[0.02] text-white/40' : 'border border-neutral-200 bg-neutral-50 text-neutral-400')
                   }`}
                 >
                   {isCompleted && !isCurrent ? (
-                    '✓'
+                    <span className="inline-block animate-in fade-in zoom-in duration-300 font-bold">✓</span>
                   ) : isCurrent ? (
                     <span className={`w-3 h-3 rounded-full border-2 border-t-transparent animate-spin ${isDark ? 'border-black' : 'border-white'}`} />
                   ) : (
@@ -199,23 +250,37 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
                     </span>
                     {(idx === 2 || idx === 3) && (
                       <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
-                        isDark ? 'bg-white/[0.08] text-white border-white/20' : 'bg-neutral-200 text-neutral-800 border-neutral-300'
+                        isDark ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20' : 'bg-indigo-50 text-indigo-700 border-indigo-200'
                       }`}>
                         PARALLEL
                       </span>
                     )}
                   </div>
-                  <p className={`text-xs mt-0.5 leading-relaxed truncate sm:text-clip ${
-                    isDark ? 'text-white/60' : 'text-neutral-500'
-                  }`}>
-                    {step.description}
-                  </p>
 
-                  {log && log.details && (
+                  {/* Active witty label when running */}
+                  {isCurrent && activeLabel && (
+                    <p className={`text-xs mt-1 font-mono font-medium animate-pulse ${
+                      isDark ? 'text-amber-300/90' : 'text-amber-700'
+                    }`}>
+                      ⚡ {activeLabel}
+                    </p>
+                  )}
+
+                  {/* Static description when pending */}
+                  {!isCurrent && (
+                    <p className={`text-xs mt-0.5 leading-relaxed truncate sm:text-clip ${
+                      isDark ? 'text-white/60' : 'text-neutral-500'
+                    }`}>
+                      {step.description}
+                    </p>
+                  )}
+
+                  {/* Detail or witty completed note */}
+                  {detailNote && (
                     <p className={`text-[11px] font-mono mt-1 px-2 py-0.5 rounded border inline-block ${
                       isDark ? 'text-white/90 bg-white/[0.04] border-white/15' : 'text-neutral-800 bg-neutral-100 border-neutral-200'
                     }`}>
-                      ↳ {log.details}
+                      ↳ {detailNote}
                     </p>
                   )}
                 </div>
@@ -223,21 +288,21 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
 
               {/* Right Column */}
               <div className="shrink-0 text-right">
-                {log ? (
+                {durationDisplay ? (
                   <div className="flex flex-col items-end">
                     <span className={`text-xs font-mono font-bold ${isDark ? 'text-white' : 'text-neutral-900'}`}>
-                      {log.duration_seconds.toFixed(2)}s
+                      {durationDisplay}
                     </span>
-                    <span className={`text-[10px] font-mono font-semibold uppercase tracking-wide ${isDark ? 'text-white/70' : 'text-neutral-500'}`}>
+                    <span className={`text-[10px] font-mono font-semibold uppercase tracking-wide ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
                       Done
                     </span>
                   </div>
                 ) : isCurrent ? (
-                  <span className={`text-xs font-mono font-bold animate-pulse ${isDark ? 'text-white' : 'text-neutral-900'}`}>
+                  <span className={`text-xs font-mono font-bold animate-pulse ${isDark ? 'text-amber-300' : 'text-amber-600'}`}>
                     Running...
                   </span>
                 ) : isCompleted ? (
-                  <span className={`text-xs font-mono font-bold ${isDark ? 'text-white' : 'text-neutral-900'}`}>
+                  <span className={`text-xs font-mono font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
                     Done
                   </span>
                 ) : (

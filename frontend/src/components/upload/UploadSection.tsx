@@ -10,6 +10,8 @@ interface UploadSectionProps {
   onReset?: () => void
   isExecutingPipeline?: boolean
   pipelineLogs?: PipelineExecutionLog[]
+  runId?: string
+  backendUrl?: string
 }
 
 export const UploadSection: React.FC<UploadSectionProps> = ({
@@ -19,6 +21,8 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
   onReset,
   isExecutingPipeline = false,
   pipelineLogs,
+  runId,
+  backendUrl,
 }) => {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
@@ -208,6 +212,8 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
           isExecuting={isExecutingPipeline}
           logs={pipelineLogs}
           fileName={activeFileName}
+          runId={runId}
+          backendUrl={backendUrl}
         />
       )}
     </div>

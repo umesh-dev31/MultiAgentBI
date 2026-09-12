@@ -206,7 +206,7 @@ export const ExploratoryAnalysisView: React.FC<ExploratoryAnalysisViewProps> = (
                       {col}
                     </span>
                     <span className="text-[11px] text-slate-500 font-mono">
-                      {items.length} distinct
+                      {items.find((i) => typeof i.total_distinct === 'number')?.total_distinct ?? items.length} distinct
                     </span>
                   </div>
 

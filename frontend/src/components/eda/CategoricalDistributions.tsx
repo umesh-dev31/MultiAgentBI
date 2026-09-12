@@ -32,8 +32,8 @@ export const CategoricalDistributions: React.FC<CategoricalDistributionsProps> =
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {categoricalCols.map((col) => {
-          const items = categoricalSummary[col]
-          const distinctCount = items[0]?.total_distinct ?? items.length
+          const items = categoricalSummary[col] || []
+          const distinctCount = items.find((i) => typeof i.total_distinct === 'number')?.total_distinct ?? items.length
           return (
             <div
               key={col}
@@ -63,7 +63,7 @@ export const CategoricalDistributions: React.FC<CategoricalDistributionsProps> =
                       </div>
 
                       {/* Visual Bar */}
-                      <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                      <div className="w-full bg-slate-100 dark:bg-white/10 rounded-full h-1.5 overflow-hidden">
                         <div
                           className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-500 transition-all duration-300"
                           style={{ width: `${Math.min(item.percentage, 100)}%` }}

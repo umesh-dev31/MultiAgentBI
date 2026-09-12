@@ -755,6 +755,17 @@ class DataAgent:
         # Cache cleaned dataframe for session/EDA consumption
         self.last_cleaned_df = df.copy()
 
+        # Compute Data Health Score (0-100)
+        health_score_data = self._calculate_data_health_score(auto_fixed_counts, flagged_for_review)
+
+        data_quality_report = {
+            "auto_fixed": auto_fixed_counts,
+            "flagged_for_review": flagged_for_review,
+            "health_score": health_score_data["score"],
+            "health_label": health_score_data["label"],
+            "data_health_score": health_score_data,
+        }
+
         return {
             "summary": {
                 "original_rows": original_rows,
@@ -766,8 +777,56 @@ class DataAgent:
             "shape": [cleaned_rows, cleaned_cols],
             "columns": columns_info,
             "cleaned_preview": clean_preview_records,
-            "data_quality_report": {
-                "auto_fixed": auto_fixed_counts,
-                "flagged_for_review": flagged_for_review,
+            "data_quality_report": data_quality_report,
+            "data_health_score": health_score_data,
+            "health_score": health_score_data["score"],
+            "health_label": health_score_data["label"],
+        }
+
+    def _calculate_data_health_score(
+        self, auto_fixed_counts: Dict[str, int], flagged_for_review: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Calculates a composite Data Health Score (0-100) from the audit report.
+        Formula:
+          - Start at 100
+          - Subtract 1.0 point per flagged row (capped at 40 points penalty)
+          - Subtract 0.5 point per auto-fix applied (capped at 20 points penalty)
+          - Thresholds:
+              Score > 80: 'Excellent' (green)
+              Score 60 to 80: 'Good' (amber)
+              Score < 60: 'Needs Review' (red)
+        """
+        total_auto_fixed = sum(auto_fixed_counts.values())
+        auto_fixed_penalty = min(20.0, total_auto_fixed * 0.5)
+
+        flagged_row_indices = set(
+            item["row_index"] for item in flagged_for_review if "row_index" in item
+        )
+        flagged_count = len(flagged_row_indices) if flagged_row_indices else len(flagged_for_review)
+        flagged_penalty = min(40.0, flagged_count * 1.0)
+
+        raw_score = 100.0 - (auto_fixed_penalty + flagged_penalty)
+        score = max(0, min(100, int(round(raw_score))))
+
+        if score > 80:
+            label = "Excellent"
+            color = "green"
+        elif score >= 60:
+            label = "Good"
+            color = "amber"
+        else:
+            label = "Needs Review"
+            color = "red"
+
+        return {
+            "score": score,
+            "label": label,
+            "color": color,
+            "penalties": {
+                "flagged_penalty": round(flagged_penalty, 1),
+                "auto_fixed_penalty": round(auto_fixed_penalty, 1),
             },
+            "total_flagged": flagged_count,
+            "total_auto_fixed": total_auto_fixed,
         }

@@ -48,21 +48,27 @@ function deriveAgentStatuses(
         id.includes(step) ||
         step.includes(label) ||
         label.includes(step) ||
-        (agent.id === 'data_cleaning' && (step.includes('data') || step.includes('cleaning'))) ||
-        (agent.id === 'validation' && step.includes('validation')) ||
-        (agent.id === 'eda' && step.includes('eda')) ||
-        (agent.id === 'ml' && step.includes('ml')) ||
+        (agent.id === 'data_cleaning' && (
+          step.includes('data') ||
+          step.includes('clean') ||
+          step.includes('imput') ||
+          step.includes('preprocess')
+        )) ||
+        (agent.id === 'validation' && (step.includes('valid') || step.includes('gate') || step.includes('audit'))) ||
+        (agent.id === 'eda' && (step.includes('eda') || step.includes('explor'))) ||
+        (agent.id === 'ml' && (step.includes('ml') || step.includes('machine') || step.includes('anomal'))) ||
         (agent.id === 'visualization' && (step.includes('visual') || step.includes('viz') || step.includes('chart'))) ||
-        (agent.id === 'insight' && (step.includes('insight') || step.includes('summary')))
+        (agent.id === 'insight' && (step.includes('insight') || step.includes('summary') || step.includes('brief')))
       )
     })
     if (!match) return agent
-    const dur = match.duration_seconds != null
-      ? match.duration_seconds < 0.05 && match.duration_seconds > 0
-        ? '<0.1s'
-        : `${match.duration_seconds.toFixed(1)}s`
-      : undefined
-    const status: AgentStatus = match.status === 'success' ? 'done' : match.status === 'failed' ? 'error' : 'done'
+    const rawDur = match.duration_seconds ?? (match as any).duration_sec ?? (match as any).duration_ms ? ((match as any).duration_ms / 1000) : 0
+    const dur = rawDur > 0 && rawDur < 0.05
+      ? '<0.1s'
+      : rawDur >= 0.05
+      ? `${rawDur.toFixed(1)}s`
+      : '0.1s'
+    const status: AgentStatus = match.status === 'failed' ? 'error' : 'done'
     return { ...agent, status, duration: dur }
   })
 }
@@ -275,7 +281,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                   {agent.status === 'error'   && '✗'}
                   {agent.status === 'idle'    && '○'}
                   {agent.status !== 'idle' && agent.duration && (
-                    <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 2 }}>{agent.duration}</span>
+                    <span style={{ opacity: 0.8, fontSize: 9, marginLeft: 2 }}>{agent.duration}</span>
                   )}
                   {agent.status === 'idle' && ' idle'}
                   {agent.status === 'done' && ' done'}
