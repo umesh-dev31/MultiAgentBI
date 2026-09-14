@@ -55,7 +55,10 @@ export const AskQuestionView = ({
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ question: q.trim() }),
+        body: JSON.stringify({
+          question: q.trim(),
+          dataset_id: currentDatasetId,
+        }),
       })
 
       const data = await response.json()

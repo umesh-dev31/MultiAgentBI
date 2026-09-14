@@ -287,20 +287,45 @@ class KnowledgeAgent:
 
         # 2. Groq fallback
         if self.groq_api_key:
+            from groq import Groq
+            client = Groq(api_key=self.groq_api_key)
+
+            kwargs: Dict[str, Any] = {
+                "model": self.groq_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 2048,
+            }
+            if "gpt-oss" in str(self.groq_model).lower():
+                kwargs["extra_body"] = {"reasoning_effort": "low"}
+
             try:
-                from groq import Groq
-                client = Groq(api_key=self.groq_api_key)
-                response = client.chat.completions.create(
-                    model=self.groq_model,
+                response = client.chat.completions.create(**kwargs)
+                if response.choices and len(response.choices) > 0:
+                    content = (response.choices[0].message.content or "").strip()
+                    if content:
+                        return content
+            except Exception:
+                pass
+
+            # Fallback to instruction model
+            try:
+                fb_response = client.chat.completions.create(
+                    model="qwen/qwen3.8-27b",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.1,
-                    max_tokens=800,
+                    max_tokens=2048,
                 )
-                if response.choices and len(response.choices) > 0:
-                    return (response.choices[0].message.content or "").strip()
+                if fb_response.choices and len(fb_response.choices) > 0:
+                    fb_content = (fb_response.choices[0].message.content or "").strip()
+                    if fb_content:
+                        return fb_content
             except Exception:
                 pass
 

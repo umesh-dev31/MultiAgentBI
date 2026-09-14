@@ -111,8 +111,12 @@ class SQLAgent:
         return "\n".join(schema_lines)
 
     def _clean_sql(self, raw_output: str) -> str:
-        """Removes markdown code fences, comments, and trailing whitespace from LLM output."""
+        """Removes markdown code fences, comments, thought tags, and trailing whitespace from LLM output."""
+        if not raw_output:
+            return ""
         text = raw_output.strip()
+        # Remove <think>...</think> tags if present
+        text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
         # Extract content inside ```sql ... ``` or ``` ... ```
         match = re.search(r"```(?:sql)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
         if match:
@@ -124,7 +128,7 @@ class SQLAgent:
             if clean_l:
                 lines.append(clean_l)
         cleaned = " ".join(lines).strip()
-        # Ensure trailing semicolon is cleaned or retained
+        # Ensure trailing semicolon is cleaned
         return cleaned.rstrip(";")
 
     def _validate_sql_safety(self, sql: str) -> Tuple[bool, Optional[str]]:
@@ -162,15 +166,15 @@ class SQLAgent:
                 client = anthropic.Anthropic(api_key=self.anthropic_api_key)
                 response = client.messages.create(
                     model=self.anthropic_model,
-                    max_tokens=600,
+                    max_tokens=2048,
                     system=system_prompt,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 if response.content and len(response.content) > 0:
                     first_block = response.content[0]
                     text_val = getattr(first_block, "text", None)
-                    if text_val is not None:
-                        return str(text_val)
+                    if text_val is not None and str(text_val).strip():
+                        return str(text_val).strip()
             except Exception as e:
                 # If Anthropic fails, fall through to Groq or raise
                 if not self.groq_api_key:
@@ -178,40 +182,70 @@ class SQLAgent:
 
         # 2. Try Groq if GROQ_API_KEY is available
         if self.groq_api_key:
+            from groq import Groq
+            client = Groq(api_key=self.groq_api_key)
+
+            # Primary model invocation
+            kwargs: Dict[str, Any] = {
+                "model": self.groq_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.0,
+                "max_tokens": 2048,
+            }
+            if "gpt-oss" in str(self.groq_model).lower():
+                kwargs["extra_body"] = {"reasoning_effort": "low"}
+
             try:
-                from groq import Groq
-                client = Groq(api_key=self.groq_api_key)
-                response = client.chat.completions.create(
-                    model=self.groq_model,
+                response = client.chat.completions.create(**kwargs)
+                if response.choices and len(response.choices) > 0:
+                    choice = response.choices[0]
+                    content = (choice.message.content or "").strip()
+                    if content:
+                        return content
+                    # If content is empty because reasoning consumed tokens or output went to reasoning
+                    reasoning = getattr(choice.message, "reasoning", None) or ""
+                    if reasoning:
+                        sql_m = re.search(r"(SELECT\s+[\s\S]+)", reasoning, re.IGNORECASE)
+                        if sql_m:
+                            return sql_m.group(1).strip()
+            except Exception:
+                pass
+
+            # Fallback to high-speed instruction model
+            try:
+                fb_response = client.chat.completions.create(
+                    model="qwen/qwen3.8-27b",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.0,
-                    max_tokens=600,
+                    max_tokens=2048,
                 )
-                if response.choices and len(response.choices) > 0:
-                    return response.choices[0].message.content or ""
-            except Exception as e:
-                # If model not found or groq error, try fallback model
-                try:
-                    from groq import Groq
-                    client = Groq(api_key=self.groq_api_key)
-                    response = client.chat.completions.create(
-                        model="qwen/qwen3.8-27b",
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt},
-                        ],
-                        temperature=0.0,
-                        max_tokens=600,
-                    )
-                    if response.choices and len(response.choices) > 0:
-                        return response.choices[0].message.content or ""
-                except Exception:
-                    raise RuntimeError(f"Groq API error: {str(e)}")
+                if fb_response.choices and len(fb_response.choices) > 0:
+                    fb_content = (fb_response.choices[0].message.content or "").strip()
+                    if fb_content:
+                        return fb_content
+            except Exception as fb_err:
+                raise RuntimeError(f"Groq API error: {str(fb_err)}")
 
         raise RuntimeError("No valid LLM API key configured (ANTHROPIC_API_KEY or GROQ_API_KEY).")
+
+    def _match_deterministic_query(self, question: str, df: pd.DataFrame) -> Optional[str]:
+        """Detects standard schema-agnostic or common user inquiries to generate guaranteed valid SQL."""
+        q = question.strip().lower()
+        if re.search(r"\b(first|top)\s+(\d+)\s+rows?\b", q):
+            m = re.search(r"\b(first|top)\s+(\d+)\s+rows?\b", q)
+            n = m.group(2) if m else "10"
+            return f"SELECT * FROM orders LIMIT {n}"
+        if any(kw in q for kw in ["first 10", "top 10 rows", "show me 10 rows", "sample rows", "preview rows", "first 10 rows"]):
+            return "SELECT * FROM orders LIMIT 10"
+        if any(kw in q for kw in ["total number of records", "total number of rows", "total count", "how many rows", "how many records", "count of records", "row count"]):
+            return "SELECT COUNT(*) AS total_records FROM orders"
+        return None
 
     def _execute_sql(
         self, conn: sqlite3.Connection, sql: str
@@ -307,30 +341,56 @@ class SQLAgent:
                 "Generate the SQLite SELECT query:"
             )
 
-            # 3. Call LLM for initial SQL query
-            try:
-                raw_sql = self._call_llm(user_prompt, system_prompt)
-            except Exception as llm_err:
-                return {
-                    "question": question,
-                    "generated_sql": "",
-                    "result": [],
-                    "row_count": 0,
-                    "error": f"LLM generation failed: {str(llm_err)}",
-                }
+            # 3. Check deterministic shortcut or call LLM for initial SQL query
+            det_sql = self._match_deterministic_query(question, validated_df)
+            if det_sql:
+                sql = det_sql
+            else:
+                try:
+                    raw_sql = self._call_llm(user_prompt, system_prompt)
+                except Exception as llm_err:
+                    return {
+                        "question": question,
+                        "generated_sql": "",
+                        "result": [],
+                        "row_count": 0,
+                        "error": f"LLM generation failed: {str(llm_err)}",
+                    }
 
-            sql = self._clean_sql(raw_sql)
+                sql = self._clean_sql(raw_sql)
 
-            # 4. Validate SQL Safety
+            # 4. Validate SQL Safety & Retry if initial SQL is empty/unsafe
             is_safe, safety_error = self._validate_sql_safety(sql)
             if not is_safe:
-                return {
-                    "question": question,
-                    "generated_sql": sql,
-                    "result": [],
-                    "row_count": 0,
-                    "error": safety_error,
-                }
+                # Attempt self-correction retry with high-emphasis prompt
+                retry_instruction_prompt = (
+                    f"Schema:\n{schema_str}\n\n"
+                    f"Question: {question.strip()}\n\n"
+                    "Generate a single, valid SQLite SELECT query against table 'orders' to answer the question. "
+                    "Do NOT output markdown fences, thought tags, or explanations. Start directly with SELECT or WITH."
+                )
+                try:
+                    retry_raw_sql = self._call_llm(retry_instruction_prompt, system_prompt)
+                    retry_sql = self._clean_sql(retry_raw_sql)
+                    is_safe_retry, safety_err_retry = self._validate_sql_safety(retry_sql)
+                    if is_safe_retry:
+                        sql = retry_sql
+                    else:
+                        return {
+                            "question": question,
+                            "generated_sql": retry_sql,
+                            "result": [],
+                            "row_count": 0,
+                            "error": safety_err_retry or safety_error,
+                        }
+                except Exception:
+                    return {
+                        "question": question,
+                        "generated_sql": sql,
+                        "result": [],
+                        "row_count": 0,
+                        "error": safety_error,
+                    }
 
             # 5. Execute query on in-memory SQLite table
             records, exec_error = self._execute_sql(conn, sql)
@@ -542,6 +602,7 @@ class SQLAgent:
 
         try:
             raw_resp = self._call_llm(user_prompt, system_prompt)
+            raw_resp = re.sub(r"<think>[\s\S]*?</think>", "", raw_resp, flags=re.IGNORECASE).strip()
             cleaned_resp = raw_resp.strip()
             arr_match = re.search(r"\[\s*\{.*\}\s*\]", cleaned_resp, re.DOTALL)
             if arr_match:

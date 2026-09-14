@@ -120,53 +120,64 @@ class InsightAgent:
 
         # 2. Try Groq
         if self.groq_api_key:
+            from groq import Groq
+            client = Groq(api_key=self.groq_api_key)
+
+            kwargs: Dict[str, Any] = {
+                "model": self.groq_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 2048,
+            }
+            if "gpt-oss" in str(self.groq_model).lower():
+                kwargs["extra_body"] = {"reasoning_effort": "low"}
+
             try:
-                from groq import Groq
-                client = Groq(api_key=self.groq_api_key)
-                response = client.chat.completions.create(
-                    model=self.groq_model,
+                response = client.chat.completions.create(**kwargs)
+                if response.choices and len(response.choices) > 0:
+                    content = (response.choices[0].message.content or "").strip()
+                    if content:
+                        return content
+            except Exception:
+                pass
+
+            # Fallback to instruction model
+            try:
+                fb_response = client.chat.completions.create(
+                    model="qwen/qwen3.8-27b",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.1,
-                    max_tokens=800,
+                    max_tokens=2048,
                 )
-                if response.choices and len(response.choices) > 0:
-                    return response.choices[0].message.content or ""
+                if fb_response.choices and len(fb_response.choices) > 0:
+                    fb_content = (fb_response.choices[0].message.content or "").strip()
+                    if fb_content:
+                        return fb_content
             except Exception as e:
-                # Try Groq fallback model
-                try:
-                    from groq import Groq
-                    client = Groq(api_key=self.groq_api_key)
-                    response = client.chat.completions.create(
-                        model="qwen/qwen3.8-27b",
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt},
-                        ],
-                        temperature=0.1,
-                        max_tokens=800,
-                    )
-                    if response.choices and len(response.choices) > 0:
-                        return response.choices[0].message.content or ""
-                except Exception:
-                    raise RuntimeError(f"Groq API error: {str(e)}")
+                raise RuntimeError(f"Groq API error: {str(e)}")
 
         raise RuntimeError("No active LLM API key configured (ANTHROPIC_API_KEY or GROQ_API_KEY).")
 
     def _extract_json_response(self, text: str) -> Optional[Dict[str, str]]:
         """Extracts and parses JSON object from LLM response text."""
+        cleaned_text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
+
         # Try direct parse
         try:
-            parsed = json.loads(text.strip())
+            parsed = json.loads(cleaned_text)
             if isinstance(parsed, dict) and "summary" in parsed:
                 return parsed
         except Exception:
             pass
 
         # Try markdown code block regex
-        code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned_text, re.DOTALL)
         if code_block:
             try:
                 parsed = json.loads(code_block.group(1))
@@ -176,7 +187,7 @@ class InsightAgent:
                 pass
 
         # Try searching for any outer braces
-        outer = re.search(r"(\{.*\})", text, re.DOTALL)
+        outer = re.search(r"(\{.*\})", cleaned_text, re.DOTALL)
         if outer:
             try:
                 parsed = json.loads(outer.group(1))
