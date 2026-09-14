@@ -165,15 +165,30 @@ export const QueryResult = ({
         ) : (
           <div className="overflow-x-auto max-h-96">
             <table className="w-full text-left border-collapse text-xs">
-              <thead className="bg-slate-100/80 sticky top-0 z-10 border-b border-slate-200">
+              <thead
+                className="sticky top-0 z-10 border-b backdrop-blur-xs"
+                style={{
+                  background: 'var(--bg-surface2)',
+                  borderColor: 'var(--border-subtle)',
+                }}
+              >
                 <tr>
-                  <th className="py-2.5 px-4 font-bold text-slate-600 uppercase tracking-wider text-[10px] w-12 text-center border-r border-slate-200">
+                  <th
+                    className="py-2.5 px-4 font-bold uppercase tracking-wider text-[10px] w-12 text-center border-r"
+                    style={{
+                      color: 'var(--text-muted)',
+                      borderColor: 'var(--border-subtle)',
+                    }}
+                  >
                     #
                   </th>
                   {columns.map((col) => (
                     <th
                       key={col}
-                      className="py-2.5 px-4 font-bold text-slate-800 tracking-wide text-xs uppercase"
+                      className="py-2.5 px-4 font-bold tracking-wide text-xs uppercase"
+                      style={{
+                        color: 'var(--text-primary)',
+                      }}
                     >
                       {col}
                     </th>

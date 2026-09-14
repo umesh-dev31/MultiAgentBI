@@ -19,6 +19,10 @@ from agents.sql_agent import SQLAgent
 from agents.ml_agent import MLAgent
 from agents.visualization_agent import VisualizationAgent
 from agents.insight_agent import InsightAgent
+from agents.knowledge_agent import KnowledgeAgent
+
+from db.database import SessionLocal, init_db
+from db.models import Dataset, PipelineRun, AuditIssue, KnowledgeChunk
 
 load_dotenv()
 
@@ -53,11 +57,12 @@ sql_agent = SQLAgent()
 ml_agent = MLAgent()
 visualization_agent = VisualizationAgent()
 insight_agent = InsightAgent()
+knowledge_agent = KnowledgeAgent()
 
 # ── Multi-Agent LangGraph Orchestration & Session Store ───────────────────────
 from orchestrator.graph import Orchestrator
 
-orchestrator = Orchestrator()
+orchestrator = Orchestrator(knowledge_agent=knowledge_agent)
 
 # Session memory stores
 current_cleaned_df: Optional[pd.DataFrame] = None
@@ -65,6 +70,7 @@ current_validated_df: Optional[pd.DataFrame] = None
 current_quality_report: Optional[dict] = None
 current_suggested_questions: Optional[list] = None
 current_pipeline_result: Optional[dict] = None
+current_dataset_id: Optional[int] = None
 
 # Registry for SSE real-time event queues keyed by session_id
 pipeline_event_queues: Dict[str, asyncio.Queue] = {}
@@ -75,6 +81,11 @@ main_loop: Optional[asyncio.AbstractEventLoop] = None
 @app.on_event("startup")
 async def startup_event():
     global main_loop
+    try:
+        init_db()
+        print("[AgentInsight Backend] Database initialized at backend/data/agentinsight.db")
+    except Exception as e:
+        print(f"[AgentInsight Backend] Database init warning: {e}")
     try:
         main_loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -291,14 +302,16 @@ def run_full_pipeline(
             )
 
         # Update global session store
-        global current_cleaned_df, current_quality_report, current_suggested_questions, current_validated_df, current_pipeline_result
+        global current_cleaned_df, current_quality_report, current_suggested_questions, current_validated_df, current_pipeline_result, current_dataset_id
         current_cleaned_df = state.get("cleaned_df")
         current_validated_df = state.get("validated_df")
         current_quality_report = state.get("data_quality_report")
         current_suggested_questions = state.get("suggested_questions")
+        current_dataset_id = state.get("dataset_id")
 
         result = {
             "status": "success",
+            "dataset_id": current_dataset_id,
             "filename": file.filename,
             "dataset_summary": state.get("dataset_summary"),
             "data_quality_report": state.get("data_quality_report"),
@@ -350,6 +363,106 @@ def run_full_pipeline(
             pass
 
 
+# ── Historical Dataset Runs & Persistent Storage ──────────────────────────────
+@app.get("/api/history")
+def get_dataset_history():
+    """Retrieves all past uploaded datasets sorted by most recent."""
+    session = SessionLocal()
+    try:
+        datasets = session.query(Dataset).order_by(Dataset.uploaded_at.desc()).all()
+        return [
+            {
+                "id": d.id,
+                "filename": d.filename,
+                "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
+                "row_count": d.row_count,
+                "validated_row_count": d.validated_row_count,
+                "flagged_count": d.flagged_count,
+            }
+            for d in datasets
+        ]
+    finally:
+        session.close()
+
+
+@app.get("/api/history/{dataset_id}")
+def get_historical_pipeline_run(dataset_id: int):
+    """Retrieves full pipeline run results for a past dataset upload, matching /api/pipeline/run shape."""
+    global current_cleaned_df, current_quality_report, current_suggested_questions, current_validated_df, current_pipeline_result, current_dataset_id
+    session = SessionLocal()
+    try:
+        dataset = session.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            raise HTTPException(status_code=404, detail=f"Dataset with ID {dataset_id} not found.")
+
+        run = session.query(PipelineRun).filter(PipelineRun.dataset_id == dataset_id).order_by(PipelineRun.created_at.desc()).first()
+        if not run:
+            raise HTTPException(status_code=404, detail=f"No pipeline run found for dataset ID {dataset_id}.")
+
+        result = {
+            "status": "success",
+            "dataset_id": dataset.id,
+            "filename": dataset.filename,
+            "dataset_summary": run.dataset_summary,
+            "data_quality_report": run.audit_report,
+            "data_health_score": run.data_health_score or (run.audit_report or {}).get("data_health_score"),
+            "eda_result": run.eda_result,
+            "ml_result": run.ml_result,
+            "visualization_result": run.visualization_result,
+            "insight_result": run.insight_result,
+            "suggested_questions": run.suggested_questions,
+            "execution_logs": run.execution_logs,
+        }
+
+        # Restore in-memory session context for follow-up SQL and RAG queries
+        current_dataset_id = dataset.id
+        current_quality_report = run.audit_report
+        current_suggested_questions = run.suggested_questions
+        current_pipeline_result = result
+
+        # Reconstruct FULL validated_df and cleaned_df from persistent storage
+        if getattr(run, "validated_data", None):
+            current_validated_df = pd.DataFrame(run.validated_data)
+        elif getattr(run, "cleaned_data", None):
+            current_validated_df = pd.DataFrame(run.cleaned_data)
+        else:
+            preview_records = (run.dataset_summary or {}).get("cleaned_preview") or []
+            current_validated_df = pd.DataFrame(preview_records) if preview_records else None
+
+        if getattr(run, "cleaned_data", None):
+            current_cleaned_df = pd.DataFrame(run.cleaned_data)
+        else:
+            current_cleaned_df = current_validated_df
+
+        return result
+    finally:
+        session.close()
+
+
+# ── RAG Knowledge Agent Endpoint ──────────────────────────────────────────────
+class KnowledgeAskRequest(BaseModel):
+    question: str
+    scope: Optional[str] = "current"  # "current" | "all_history"
+    dataset_id: Optional[int] = None
+
+
+@app.post("/api/knowledge/ask")
+def ask_knowledge_agent(request: KnowledgeAskRequest):
+    """Answers meta-questions about audit issues or insights using RAG KnowledgeAgent."""
+    target_ds_id = request.dataset_id or current_dataset_id
+    try:
+        return knowledge_agent.answer_question(
+            question=request.question,
+            current_dataset_id=target_ds_id,
+            scope=request.scope or "current",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Knowledge Agent retrieval failed: {str(exc)}",
+        )
+
+
 @app.post("/api/query")
 def run_sql_query(request: QueryRequest):
     """Executes a natural language business question by translating it to a safe SQLite query,
@@ -363,10 +476,11 @@ def run_sql_query(request: QueryRequest):
             detail="No cleaned dataset found in session. Please upload a dataset first.",
         )
     try:
+        qr = current_quality_report if current_validated_df is None else None
         return sql_agent.generate_and_run(
             question=request.question,
             df=target_df,
-            quality_report=current_quality_report,
+            quality_report=qr,
         )
     except Exception as exc:
         raise HTTPException(

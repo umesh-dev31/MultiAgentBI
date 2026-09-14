@@ -13,6 +13,7 @@ from agents.sql_agent import SQLAgent
 from agents.ml_agent import MLAgent
 from agents.visualization_agent import VisualizationAgent
 from agents.insight_agent import InsightAgent
+from agents.knowledge_agent import KnowledgeAgent
 
 
 class PipelineState(TypedDict):
@@ -30,6 +31,7 @@ class PipelineState(TypedDict):
     visualization_result: Optional[Dict[str, Any]]
     insight_result: Optional[Dict[str, Any]]
     suggested_questions: Optional[List[Dict[str, Any]]]
+    dataset_id: Optional[int]
     current_step: Optional[str]
     errors: Annotated[List[str], operator.add]
     execution_logs: Annotated[List[Dict[str, Any]], operator.add]
@@ -46,6 +48,7 @@ class Orchestrator:
         ml_agent: Optional[MLAgent] = None,
         visualization_agent: Optional[VisualizationAgent] = None,
         insight_agent: Optional[InsightAgent] = None,
+        knowledge_agent: Optional[KnowledgeAgent] = None,
     ):
         self.data_agent = data_agent or DataAgent()
         self.eda_agent = eda_agent or EDAAgent()
@@ -53,6 +56,7 @@ class Orchestrator:
         self.ml_agent = ml_agent or MLAgent()
         self.visualization_agent = visualization_agent or VisualizationAgent()
         self.insight_agent = insight_agent or InsightAgent()
+        self.knowledge_agent = knowledge_agent or KnowledgeAgent()
 
         self.event_callback = None
         self.graph = self._build_graph()
@@ -513,10 +517,11 @@ class Orchestrator:
     def sql_node(self, question: str, state: PipelineState) -> Dict[str, Any]:
         """Executes natural language SQL query on the validated subset from state."""
         df = state.get("validated_df") if state.get("validated_df") is not None else state.get("cleaned_df")
+        qr = state.get("data_quality_report") if state.get("validated_df") is None else None
         return self.sql_agent.generate_and_run(
             question=question,
             df=df,
-            quality_report=state.get("data_quality_report"),
+            quality_report=qr,
         )
 
     # =========================================================================
@@ -592,6 +597,7 @@ class Orchestrator:
             "visualization_result": None,
             "insight_result": None,
             "suggested_questions": None,
+            "dataset_id": None,
             "current_step": "init",
             "errors": [],
             "execution_logs": [],
@@ -613,6 +619,120 @@ class Orchestrator:
             print("Execution Telemetry:")
             for log in final_state.get("execution_logs", []):
                 print(f"   • {log['step']:<20}: {log['duration_sec']}s [{log['status']}] - {log['details']}")
+
+            # Persist dataset and pipeline run to database + RAG indexing
+            try:
+                from db.database import SessionLocal
+                from db.models import Dataset, PipelineRun, AuditIssue
+
+                session = SessionLocal()
+                try:
+                    fname = os.path.basename(file_path) if file_path else "dataset.csv"
+                    summary_obj = final_state.get("dataset_summary") or {}
+                    inner_sum = summary_obj.get("summary") or {}
+                    total_rows = inner_sum.get("original_rows") or inner_sum.get("total_rows") or 0
+                    if not total_rows and final_state.get("cleaned_df") is not None:
+                        total_rows = len(final_state["cleaned_df"])
+
+                    val_df = final_state.get("validated_df")
+                    cleaned_df = final_state.get("cleaned_df")
+                    val_rows = len(val_df) if val_df is not None else (len(cleaned_df) if cleaned_df is not None else 0)
+
+                    qreport = final_state.get("data_quality_report") or {}
+                    flagged_list = qreport.get("flagged_for_review", [])
+                    flagged_cnt = len(flagged_list)
+
+                    # 1. Dataset record
+                    ds_record = Dataset(
+                        filename=fname,
+                        row_count=total_rows,
+                        validated_row_count=val_rows,
+                        flagged_count=flagged_cnt,
+                    )
+                    session.add(ds_record)
+                    session.flush()
+                    ds_id = ds_record.id
+
+                    # Serialize full validated and cleaned DataFrames
+                    def _to_clean_records(df_obj):
+                        if df_obj is None or not isinstance(df_obj, pd.DataFrame) or df_obj.empty:
+                            return None
+                        raw_list = df_obj.to_dict(orient="records")
+                        clean_list = []
+                        for row in raw_list:
+                            c_row = {}
+                            for col_k, col_v in row.items():
+                                if pd.isna(col_v):
+                                    c_row[str(col_k)] = None
+                                elif isinstance(col_v, (int, float, bool, str)):
+                                    c_row[str(col_k)] = col_v
+                                elif hasattr(col_v, "item"):
+                                    c_row[str(col_k)] = col_v.item()
+                                elif hasattr(col_v, "isoformat"):
+                                    c_row[str(col_k)] = col_v.isoformat()
+                                else:
+                                    c_row[str(col_k)] = str(col_v)
+                            clean_list.append(c_row)
+                        return clean_list
+
+                    val_records = _to_clean_records(val_df)
+                    clean_records = _to_clean_records(cleaned_df)
+
+                    # 2. PipelineRun record
+                    health_sc = final_state.get("data_health_score") or qreport.get("data_health_score")
+                    run_record = PipelineRun(
+                        dataset_id=ds_id,
+                        dataset_summary=summary_obj,
+                        eda_result=final_state.get("eda_result"),
+                        ml_result=final_state.get("ml_result"),
+                        visualization_result=final_state.get("visualization_result"),
+                        insight_result=final_state.get("insight_result"),
+                        audit_report=qreport,
+                        validated_data=val_records,
+                        cleaned_data=clean_records,
+                        data_health_score=health_sc,
+                        suggested_questions=final_state.get("suggested_questions"),
+                        execution_logs=final_state.get("execution_logs"),
+                    )
+                    session.add(run_record)
+
+                    # 3. AuditIssue records
+                    for issue in flagged_list:
+                        row_i = issue.get("row_index")
+                        col_n = issue.get("column") or issue.get("column_name")
+                        orig_v = issue.get("original_value")
+                        orig_v_str = str(orig_v) if orig_v is not None else None
+                        reason_str = str(issue.get("reason", ""))
+                        audit_rec = AuditIssue(
+                            dataset_id=ds_id,
+                            row_index=row_i,
+                            column_name=col_n,
+                            original_value=orig_v_str,
+                            reason=reason_str,
+                        )
+                        session.add(audit_rec)
+
+                    session.commit()
+
+                    # 4. RAG Knowledge indexing
+                    self.knowledge_agent.index_pipeline_run(
+                        dataset_id=ds_id,
+                        audit_report=qreport,
+                        insight_result=final_state.get("insight_result"),
+                        filename=fname,
+                        db_session=session,
+                    )
+
+                    final_state["dataset_id"] = ds_id
+                    print(f"\033[92m[LangGraph Orchestrator] ✓ Persisted Dataset #{ds_id} + PipelineRun & AuditIssues to SQLite & indexed RAG chunks.\033[0m")
+                except Exception as inner_e:
+                    session.rollback()
+                    print(f"\033[93m[LangGraph Orchestrator] Warning: DB persistence failed: {inner_e}\033[0m")
+                finally:
+                    session.close()
+            except Exception as outer_e:
+                print(f"\033[93m[LangGraph Orchestrator] Warning: Database engine failed: {outer_e}\033[0m")
+
         print("=" * 70 + "\n")
         return final_state
 

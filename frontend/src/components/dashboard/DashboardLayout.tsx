@@ -4,7 +4,7 @@ import { RightInspector } from './RightInspector'
 import { ThemeToggle } from '../ThemeToggle'
 import type { PipelineExecutionLog, UploadResponse } from '../../types/data'
 
-type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights'
+type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
 
 interface DashboardLayoutProps {
   children: React.ReactNode
@@ -114,7 +114,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Dashboard</span>
             <span style={{ color: 'var(--border-medium)' }}>›</span>
             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', textTransform: 'capitalize' }}>
-              {activeTab === 'sql' ? 'Ask a Question' : activeTab === 'eda' ? 'Exploration' : activeTab === 'ml' ? 'ML Insights' : activeTab === 'insights' ? 'Business Summary' : activeTab === 'quality' ? 'Data Quality' : 'Upload'}
+              {activeTab === 'sql' ? 'Ask a Question' : activeTab === 'eda' ? 'Exploration' : activeTab === 'ml' ? 'ML Insights' : activeTab === 'insights' ? 'Business Summary' : activeTab === 'quality' ? 'Data Quality' : activeTab === 'history' ? 'Upload History' : 'Upload'}
             </span>
           </div>
 

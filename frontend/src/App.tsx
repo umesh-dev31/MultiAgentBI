@@ -12,6 +12,7 @@ import { MonthlyTrendChart } from './components/eda/MonthlyTrendChart'
 import { AskQuestionView } from './components/sql/AskQuestionView'
 import { MLInsightsView } from './components/ml/MLInsightsView'
 import { BusinessSummaryView } from './components/insights/BusinessSummaryView'
+import { HistoryView } from './components/history/HistoryView'
 import type {
   EDAResponse,
   UploadResponse,
@@ -21,12 +22,27 @@ import type {
 
 const BACKEND_URL = 'http://localhost:8000'
 
-type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights'
+type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
 type AppView = 'landing' | 'dashboard'
 
 function App() {
-  const [currentView, setCurrentView] = useState<AppView>('landing')
-  const [activeTab, setActiveTab] = useState<ActiveTab>('upload')
+  const [currentView, setCurrentView] = useState<AppView>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('view') === 'dashboard' || params.get('tab')) return 'dashboard'
+    } catch {}
+    return 'landing'
+  })
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const t = params.get('tab') as ActiveTab
+      if (t && ['upload', 'quality', 'eda', 'sql', 'ml', 'insights', 'history'].includes(t)) {
+        return t
+      }
+    } catch {}
+    return 'upload'
+  })
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
   const [uploading, setUploading] = useState<boolean>(false)
   const [edaLoading, setEdaLoading] = useState<boolean>(false)
@@ -39,6 +55,8 @@ function App() {
   const [suggestedQuestions, setSuggestedQuestions] = useState<any[] | null>(null)
   const [pipelineLogs, setPipelineLogs] = useState<PipelineExecutionLog[] | undefined>(undefined)
   const [currentRunId, setCurrentRunId] = useState<string | undefined>(undefined)
+  const [currentDatasetId, setCurrentDatasetId] = useState<number | null>(null)
+  const [historyLoadingId, setHistoryLoadingId] = useState<number | null>(null)
 
   // Verify backend health on mount and periodically
   const checkHealth = async () => {
@@ -108,6 +126,7 @@ function App() {
       const data: PipelineRunResponse = await response.json()
 
       setBackendOnline(true)
+      if (data.dataset_id) setCurrentDatasetId(data.dataset_id)
       setPipelineLogs(data.execution_logs || [])
       setDatasetResult(data.dataset_summary)
       setEdaResult(data.eda_result)
@@ -135,8 +154,52 @@ function App() {
       setMlResult(null)
       setInsightsResult(null)
       setSuggestedQuestions(null)
+      setCurrentDatasetId(null)
     } finally {
       setUploading(false)
+    }
+  }
+
+  const handleLoadHistoricalDataset = async (datasetId: number) => {
+    setError(null)
+    setHistoryLoadingId(datasetId)
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/history/${datasetId}`)
+      if (!response.ok) {
+        let errorMessage = `Failed to load history dataset (HTTP ${response.status})`
+        try {
+          const errJson = await response.json()
+          if (errJson?.detail) errorMessage = errJson.detail
+        } catch {
+          errorMessage = response.statusText || errorMessage
+        }
+        throw new Error(errorMessage)
+      }
+
+      const data: PipelineRunResponse = await response.json()
+      setBackendOnline(true)
+      setCurrentDatasetId(data.dataset_id || datasetId)
+      setActiveFileName(data.filename || `dataset_${datasetId}.csv`)
+      setPipelineLogs(data.execution_logs || [])
+      setDatasetResult(data.dataset_summary)
+      setEdaResult(data.eda_result)
+      setMlResult(data.ml_result)
+      setSuggestedQuestions(data.suggested_questions || null)
+
+      const combinedInsights = {
+        ...(data.insight_result || {}),
+        charts: data.visualization_result?.charts || [],
+      }
+      setInsightsResult(combinedInsights)
+      setActiveTab('quality')
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'An unexpected error occurred while loading historical dataset.'
+      )
+    } finally {
+      setHistoryLoadingId(null)
     }
   }
 
@@ -148,6 +211,8 @@ function App() {
     setSuggestedQuestions(null)
     setPipelineLogs(undefined)
     setCurrentRunId(undefined)
+    setCurrentDatasetId(null)
+    setHistoryLoadingId(null)
     setEdaLoading(false)
     setError(null)
     setActiveFileName('')
@@ -339,6 +404,7 @@ function App() {
               backendUrl={BACKEND_URL}
               disabled={!hasData}
               suggestedQuestions={suggestedQuestions as any}
+              currentDatasetId={currentDatasetId}
             />
           </div>
         )}
@@ -406,13 +472,23 @@ function App() {
           </div>
         )}
 
+        {/* ── TAB 7: UPLOAD HISTORY ─────────────────────────────────── */}
+        {activeTab === 'history' && (
+          <HistoryView
+            backendUrl={BACKEND_URL}
+            onLoadDataset={handleLoadHistoricalDataset}
+            activeDatasetId={currentDatasetId}
+            loadingDatasetId={historyLoadingId}
+          />
+        )}
+
         {/* ── Empty / No data state for locked tabs ─────────────────── */}
-        {!hasData && activeTab !== 'upload' && (
+        {!hasData && activeTab !== 'upload' && activeTab !== 'history' && (
           <div className="empty-state">
             <div className="empty-state-icon">📂</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-secondary)' }}>No dataset loaded</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 280 }}>
-              Upload a CSV on the Upload tab to unlock this view.
+              Upload a CSV on the Upload tab or select a run from the History tab to unlock this view.
             </div>
             <button className="btn-primary" onClick={() => setActiveTab('upload')}>
               Go to Upload

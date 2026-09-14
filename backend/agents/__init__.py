@@ -6,6 +6,7 @@ from .sql_agent import SQLAgent
 from .ml_agent import MLAgent
 from .visualization_agent import VisualizationAgent
 from .insight_agent import InsightAgent
+from .knowledge_agent import KnowledgeAgent
 
 __all__ = [
     "DataAgent",
@@ -14,4 +15,5 @@ __all__ = [
     "MLAgent",
     "VisualizationAgent",
     "InsightAgent",
+    "KnowledgeAgent",
 ]

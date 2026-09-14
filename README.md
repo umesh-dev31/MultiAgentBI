@@ -5,11 +5,13 @@
 ![AgentInsight AI](https://img.shields.io/badge/AgentInsight-AI-6366f1?style=for-the-badge&logo=robot&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![React](https://img.shields.io/badge/React-18+-61DAFB?style=for-the-badge&logo=react&logoColor=black)
+![LangGraph](https://img.shields.io/badge/LangGraph-Orchestrated-FF6F00?style=for-the-badge&logo=diagram-next&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-PostgreSQL%20Compatible-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white)
+![React](https://img.shields.io/badge/React-19+-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
-![scikit-learn](https://img.shields.io/badge/scikit--learn-ML-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-ML%20%26%20RAG-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)
 
-**Upload a messy CSV → get instant AI-powered data cleaning, statistical analysis, natural-language SQL queries, and machine learning anomaly detection — all in one platform.**
+**Upload a messy CSV → get instant AI-powered data cleaning, statistical analysis, interactive visualizations, executive recommendations, natural-language SQL queries, ML anomaly detection, persistent history, and RAG-powered knowledge retrieval.**
 
 </div>
 
@@ -17,86 +19,124 @@
 
 ## 📸 Overview
 
-AgentInsight AI is a full-stack, modular multi-agent platform that transforms raw business datasets into actionable intelligence. Each agent is a **standalone, independently-testable Python module** responsible for a specific analytical domain. The React/TypeScript frontend provides a clean tabbed interface that guides the user from upload through to predictive ML insights.
+AgentInsight AI is an autonomous, full-stack multi-agent platform that transforms raw, messy business datasets into clean, actionable intelligence. Orchestrated by **LangGraph**, each agent is a specialized Python module executing bounded tasks with strict validation guarantees.
 
-### Agent Architecture
+The platform includes **SQLAlchemy-backed persistent storage** (PostgreSQL-compatible, SQLite local demo) for historical runs and a **RAG Knowledge Agent** that indexes audit logs and analytical summaries for instant, grounded natural-language answers with source citations.
+
+### 🧩 Multi-Agent Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    AgentInsight AI                      │
-│                                                         │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
-│  │ Data Agent  │  │  EDA Agent  │  │  SQL Agent  │     │
-│  │             │  │             │  │             │     │
-│  │ Cleans &    │  │ Statistical │  │ NL → SQL    │     │
-│  │ validates   │  │ analysis &  │  │ via Groq    │     │
-│  │ raw CSV     │  │ trend charts│  │ LLM + SQLite│     │
-│  └─────────────┘  └─────────────┘  └─────────────┘     │
-│                                                         │
-│                   ┌─────────────┐                       │
-│                   │  ML Agent   │                       │
-│                   │             │                       │
-│                   │ IsoForest   │                       │
-│                   │ anomaly det │                       │
-│                   │ + Lin. Reg  │                       │
-│                   │ forecasting │                       │
-│                   └─────────────┘                       │
-└─────────────────────────────────────────────────────────┘
+                               ┌─────────────────────────┐
+                               │     Raw CSV Upload      │
+                               └────────────┬────────────┘
+                                            │
+                                            ▼
+                               ┌─────────────────────────┐
+                               │      Data Agent         │
+                               │  Cleaning & Auto-Fixes  │
+                               └────────────┬────────────┘
+                                            │
+                                            ▼
+                               ┌─────────────────────────┐
+                               │    Validation Agent     │
+                               │ Flags Bad Rows & Errors │
+                               └────────────┬────────────┘
+                                            │
+                        ┌───────────────────┴───────────────────┐
+                        │                                       │
+                        ▼                                       ▼
+             ┌─────────────────────┐                 ┌─────────────────────┐
+             │      EDA Agent      │                 │      ML Agent       │
+             │ Stats, Trends, Corr │                 │ Anomaly Detection   │
+             └──────────┬──────────┘                 │ Linear Forecasting  │
+                        │                            └──────────┬──────────┘
+                        │                                       │
+                        └───────────────────┬───────────────────┘
+                                            │
+                                            ▼
+                               ┌─────────────────────────┐
+                               │   Visualization Agent   │
+                               │   Smart Chart Schemas   │
+                               └────────────┬────────────┘
+                                            │
+                                            ▼
+                               ┌─────────────────────────┐
+                               │      Insight Agent      │
+                               │ Executive Recommendations│
+                               └────────────┬────────────┘
+                                            │
+                                            ▼
+                               ┌─────────────────────────┐
+                               │   Persistence & RAG     │
+                               │  SQLAlchemy + TF-IDF    │
+                               └─────────────────────────┘
 ```
 
 ---
 
-## ✨ Features
+## ✨ Features & Agents
 
-### 🧹 Data Agent — Intelligent Data Cleaning
-- Detects and strips currency symbols (`$`, `€`, `£`), thousands separators, whitespace
-- Normalizes casing for low-cardinality categorical columns (region, product) while **preserving** customer names and free-text fields
-- Parses ambiguous date formats (DD/MM/YYYY, ISO, regional) with day-first enforcement
-- Flags **negative values**, **zero values** (business-invalid: quantity=0 or price=0), non-numeric text, and calendar impossibilities (Feb 30, Month 13)
-- Performs **intelligent imputation**: median for numeric, mode for categorical — only on true nulls, never on flagged problem cells
-- Drops exact duplicate rows
-- Returns a comprehensive `DataQualityReport` with flagged row details, auto-fix counts, and column schemas
+### 1. 🧹 Data Agent — Autonomous Data Cleaning & Normalization
+- Detects and strips currency symbols (`$`, `€`, `£`, `₹`), thousands commas, and whitespace.
+- Normalizes casing on low-cardinality categorical columns while preserving customer names and free text.
+- Parses complex/ambiguous date formats (DD/MM/YYYY, ISO-8601, regional strings).
+- Performs intelligent imputation (median for numeric, mode for categorical) exclusively on genuine nulls.
 
-### 📊 EDA Agent — Exploratory Data Analysis
-- Computes validated-subset descriptive statistics (mean, median, std, min/max, quartiles) excluding flagged/outlier rows
-- Detects categorical column distributions with Top-5 value breakdowns
-- Builds Pearson correlation matrix across numeric features
-- Groups monthly revenue/order trends for time-series visualization
-- Surfaces notable patterns (top revenue-driving categories, regional skews, price range analysis)
+### 2. 🛡️ Validation Agent — Strict Quality Assurance & Isolation
+- Evaluates data against strict business rules (flags negative prices/quantities, zero values, and calendar impossibilities like Feb 30).
+- Isolates problem rows into a pristine `AuditReport` while ensuring downstream agents only compute on certified, uncontaminated data.
+- Generates detailed issue logs: row index, column name, raw value, and human-readable reason.
 
-### 🗣️ SQL Agent — Natural Language → SQL
-- Accepts plain-English business questions (e.g. *"What is the total revenue by region?"*)
-- Loads the validated DataFrame into an **in-memory SQLite** database as `orders`
-- Calls the **Groq LLM API** (configurable model) to generate a single valid `SELECT` query
-- Validates SQL safety: **blocks INSERT, UPDATE, DELETE, DROP, ALTER** — SELECT-only
-- Auto-retries up to 3 times with refined prompts if validation or execution fails
-- Returns column headers + rows + the raw SQL used for full transparency
+### 3. 📊 EDA Agent — Exploratory Data Analysis
+- Computes comprehensive descriptive statistics on validated subsets (mean, median, standard deviation, quartiles, min/max).
+- Calculates categorical distributions with top-value breakdowns.
+- Computes a Pearson correlation matrix across numeric features.
+- Aggregates monthly revenue and volume trends for temporal analysis.
 
-### 🤖 ML Agent — Machine Learning Insights
-- **Anomaly Detection** via scikit-learn `IsolationForest`:
-  - Builds **per-category normalized features** — Laptop prices are compared to *Laptop* medians, not the global median, so $60,000 Laptops aren't falsely flagged
-  - Returns top-12 anomalies sorted by severity score with plain-English explanations
-  - Each explanation is always category-relative: *"Unit price $7,975 is 739% above the 'Keyboard' category median of $950"*
-- **Trend Forecasting** via linear regression:
-  - Groups historical data monthly (identical logic to EDA)
-  - Projects next 3 months with honest confidence labelling
-  - Reports `"insufficient"` confidence when fewer than 2 historical periods are available — no fake numbers
+### 4. 🤖 ML Agent — Machine Learning Anomaly Detection & Forecasting
+- **Per-Category Normalized Isolation Forest**: Detects statistical anomalies relative to category peers rather than global distributions, avoiding false positives on inherently high-value items.
+- Provides plain-English explanations for every flagged anomaly with percentage deviations.
+- **Trend Forecasting**: Linear regression modeling on historical monthly periods with dynamic confidence levels (`high`, `medium`, `insufficient`).
+
+### 5. 📈 Visualization Agent — Autonomous Chart Generation
+- Translates statistical distributions into recommended charts (bar, line, scatter, pie, heatmap).
+- Emits schema-compliant chart configurations rendered natively with responsive SVG.
+
+### 6. 💡 Insight Agent — Executive Synthesis & Strategic Recommendations
+- Synthesizes findings across EDA, ML, and Validation into an Executive Summary.
+- Delivers prioritized business recommendations, operational risks, and growth opportunities.
+
+### 7. 🗣️ SQL Agent — Text-to-SQL with In-Memory Execution
+- Translates natural-language questions (e.g., *"What is the total sales amount per month?"*) into safe, read-only SQLite `SELECT` queries.
+- Powered by the **Groq LLM API** with automatic self-correction retries.
+- Enforces strict security: blocks `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, and `CREATE`.
+
+### 8. 🧠 RAG Knowledge Agent — Semantic Question Answering over Analyses
+- Indexes flagged audit issues and analytical summaries into a structured knowledge base.
+- Uses **scikit-learn TF-IDF vectorization + cosine similarity** with exact row-number match boosting.
+- Answers questions like *"Why was row 13 flagged?"* or *"What data quality issues were found?"*.
+- Dual retrieval scope: query within the **Current Dataset** or across **All Historical Uploads**.
+- Displays expandable evidence drawer with similarity scores, chunk types, and citations.
+
+### 9. 🗄️ Persistent Storage & History
+- Built with **SQLAlchemy ORM** connected to a SQLite database (`backend/data/agentinsight.db`), fully architected for drop-in PostgreSQL migration.
+- Persists datasets, complete pipeline runs (EDA, ML, Insights, Visualizations, Cleaned & Validated Data), audit issues, and RAG knowledge chunks.
+- Dedicated **History Tab** allows users to review past uploads and restore any historical session into the live analytical workspace with 1 click.
 
 ---
 
 ## 🏗️ Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **Backend API** | FastAPI + Uvicorn |
-| **Data Processing** | pandas, NumPy |
-| **Machine Learning** | scikit-learn (IsolationForest, LinearRegression) |
-| **SQL Engine** | SQLite (in-memory) via Python `sqlite3` |
-| **LLM (SQL Agent)** | Groq API (openai-compatible, configurable model) |
-| **Frontend** | React 18 + TypeScript + Vite |
-| **Styling** | Vanilla CSS (no framework) |
-| **Charts** | Custom SVG (no chart library dependency) |
-| **Dev Environment** | Python venv, npm |
+| Layer | Technology | Description |
+|-------|-----------|-------------|
+| **Pipeline Orchestration** | LangGraph | State-machine workflow directing data and agent handoffs |
+| **Backend Framework** | FastAPI + Uvicorn | High-performance asynchronous REST API |
+| **Data Processing** | pandas, NumPy | High-speed data manipulation and cleaning |
+| **Machine Learning & RAG** | scikit-learn | IsolationForest, LinearRegression, TfidfVectorizer, cosine_similarity |
+| **Database & ORM** | SQLAlchemy | ORM layer with SQLite (PostgreSQL compatible) |
+| **LLM & Text-to-SQL** | Groq API | Ultra-low-latency LLM inference |
+| **Frontend Framework** | React 19 + TypeScript + Vite | Type-safe, reactive single-page dashboard |
+| **Styling & Theme** | Vanilla CSS + Tailwind v4 | Glassmorphism, CSS design tokens, seamless Dark & Light mode |
 
 ---
 
@@ -106,36 +146,46 @@ AgentInsight AI is a full-stack, modular multi-agent platform that transforms ra
 insight/
 ├── backend/
 │   ├── agents/
-│   │   ├── data_agent.py       # Data ingestion, cleaning & quality report
-│   │   ├── eda_agent.py        # Statistical EDA & trend analysis
-│   │   ├── sql_agent.py        # NL→SQL via Groq LLM + SQLite executor
-│   │   └── ml_agent.py         # IsolationForest anomaly + linear regression forecast
-│   ├── tests/
-│   │   ├── test_data_agent.py
-│   │   ├── test_eda_agent.py
-│   │   └── test_ml_agent.py
-│   ├── main.py                 # FastAPI app + CORS + session state
-│   ├── requirements.txt
-│   ├── .env                    # API keys (not committed)
-│   └── run.bat                 # One-command dev server start
+│   │   ├── data_agent.py           # Ingestion, cleaning & quality analysis
+│   │   ├── eda_agent.py            # Statistical analysis & correlation
+│   │   ├── sql_agent.py            # Natural language to SQLite query execution
+│   │   ├── ml_agent.py             # IsolationForest & trend regression
+│   │   ├── visualization_agent.py  # Autonomous chart configuration
+│   │   ├── insight_agent.py        # Executive summaries & recommendations
+│   │   └── knowledge_agent.py      # TF-IDF RAG agent over audit & insights
+│   ├── db/
+│   │   ├── database.py             # SQLAlchemy session & SQLite engine setup
+│   │   └── models.py               # Dataset, PipelineRun, AuditIssue, KnowledgeChunk
+│   ├── orchestrator/
+│   │   ├── graph.py                # LangGraph pipeline state graph & persistence
+│   │   └── state.py                # TypedDict state definitions
+│   ├── data/
+│   │   └── .gitkeep                # Preserves database directory (DB ignored in git)
+│   ├── tests/                      # Pytest unit & regression tests
+│   ├── main.py                     # FastAPI routes, CORS, session state & lifecycle
+│   └── requirements.txt
 │
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── upload/         # File upload drag-and-drop
-│   │   │   ├── dataQuality/    # Data quality report viewer
-│   │   │   ├── preview/        # Schema + cleaned data table
-│   │   │   ├── eda/            # EDA charts & statistical summaries
-│   │   │   ├── sql/            # NL query input + results table
-│   │   │   └── ml/             # Anomaly cards + forecast SVG chart
-│   │   ├── types/              # TypeScript interfaces
-│   │   ├── App.tsx             # Tab navigation + session state
-│   │   └── main.tsx
+│   │   │   ├── dashboard/          # Canvas, header, sidebar & layout
+│   │   │   ├── upload/             # File dropzone & upload pipeline
+│   │   │   ├── dataQuality/        # Audit report & issue inspection
+│   │   │   ├── preview/            # Cleaned data table preview
+│   │   │   ├── eda/                # Summary stats, charts & correlation
+│   │   │   ├── ml/                 # Anomaly cards & regression trends
+│   │   │   ├── sql/                # SQL Query & RAG Question dual-mode views
+│   │   │   ├── history/            # Historical dataset viewer & 1-click restore
+│   │   │   └── landing/            # Silk canvas visual presentation
+│   │   ├── context/                # ThemeContext (Dark / Light switcher)
+│   │   ├── types/                  # TypeScript data contracts & API interfaces
+│   │   ├── App.tsx                 # Routing, global workspace state
+│   │   └── index.css               # Design tokens, dark mode bridge & utilities
 │   ├── package.json
 │   └── vite.config.ts
 │
-├── brutal_data_cleaning_test.csv   # Sample dataset for testing
-├── dev.bat                         # Launches both frontend + backend
+├── brutal_data_cleaning_test.csv   # Comprehensive test dataset with edge cases
+├── dev.bat                         # Launches frontend + backend concurrently
 └── README.md
 ```
 
@@ -144,11 +194,11 @@ insight/
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- A [Groq API key](https://console.groq.com/) (free tier available)
+- **Python 3.11+**
+- **Node.js 18+** & **npm**
+- A free **[Groq API Key](https://console.groq.com/)**
 
-### 1. Clone the repo
+### 1. Clone the Repository
 ```bash
 git clone https://github.com/umesh-dev31/MultiAgentBI.git
 cd MultiAgentBI
@@ -158,59 +208,55 @@ cd MultiAgentBI
 ```bash
 cd backend
 
-# Create virtual environment
+# Create and activate virtual environment
 python -m venv venv
 
-# Activate (Windows)
+# Windows
 .\venv\Scripts\activate
+
+# macOS / Linux
+source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Create .env file
-copy .env.example .env
-# Then edit .env and add your GROQ_API_KEY
+# Configure environment variables
+copy .env.example .env   # On Windows
+cp .env.example .env     # On macOS/Linux
+```
+
+Edit `backend/.env`:
+```env
+GROQ_API_KEY=gsk_your_groq_api_key_here
+GROQ_MODEL=openai/gpt-oss-120b
 ```
 
 ### 3. Frontend Setup
 ```bash
-cd frontend
+cd ../frontend
 npm install
 ```
 
-### 4. Run the App
+### 4. Launch the Platform
 
-**Option A — Single command (recommended):**
+**Option A — Unified Windows Script:**
 ```bash
 # From project root
 .\dev.bat
 ```
 
-**Option B — Separately:**
+**Option B — Independent Terminals:**
 ```bash
 # Terminal 1: Backend
-cd backend && .\run.bat
+cd backend
+.\run.bat    # or: uvicorn main:app --reload --port 8000
 
 # Terminal 2: Frontend
-cd frontend && npm run dev
+cd frontend
+npm run dev  # Vite starts on http://localhost:5173
 ```
 
-Open **http://localhost:5173** in your browser.
-
----
-
-## ⚙️ Configuration
-
-Create `backend/.env`:
-```env
-# Required: Groq API key for SQL Agent NL→SQL generation
-GROQ_API_KEY=your_groq_api_key_here
-
-# Optional: Groq model to use (default: openai/gpt-oss-120b)
-GROQ_MODEL=openai/gpt-oss-120b
-```
-
-Get a free Groq key at [console.groq.com](https://console.groq.com/).
+Navigate to **http://localhost:5173** in your browser.
 
 ---
 
@@ -218,69 +264,38 @@ Get a free Groq key at [console.groq.com](https://console.groq.com/).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Backend health check |
-| `POST` | `/api/upload` | Upload CSV/Excel, returns cleaned data + quality report |
-| `POST` | `/api/eda` | Run EDA on the current session's cleaned dataset |
-| `POST` | `/api/query` | Body: `{"question": "..."}` → NL to SQL query + results |
-| `POST` | `/api/ml-insights` | Anomaly detection + trend forecasting on validated data |
-
-All endpoints except `/health` require a dataset to have been uploaded first in the same server session.
-
----
-
-## 🧪 Data Quality Rules
-
-The Data Agent and all downstream agents enforce these validation rules consistently:
-
-| Rule | Handling |
-|------|----------|
-| Duplicate rows | Auto-removed |
-| Whitespace in strings | Auto-stripped |
-| Currency symbols (`$`, `€`) | Auto-parsed to float |
-| Thousands separators (`,`) | Auto-parsed |
-| Mixed case categories | Auto-normalized to Title Case |
-| Ambiguous dates (DD/MM/YYYY) | Auto-parsed with day-first |
-| Unparseable dates | Flagged, set to null |
-| Non-numeric text in numeric cols | Flagged, set to null |
-| **Negative quantity/price** | Flagged, excluded from analysis |
-| **Zero quantity/price** | Flagged, excluded (business-invalid) |
-| Statistical outliers (>3× IQR) | Flagged, excluded from analysis |
-| Missing values (true nulls) | Imputed (median/mode) |
+| `GET` | `/health` | Health check & system status |
+| `POST` | `/api/upload` | Ingests CSV, runs full LangGraph pipeline, persists run, returns analysis |
+| `POST` | `/api/query` | Body: `{"question": "..."}` → NL-to-SQL execution against SQLite |
+| `POST` | `/api/knowledge/ask` | Body: `{"question": "...", "scope": "current"\|"all_history", "dataset_id": 1}` → RAG response with retrieved chunks |
+| `GET` | `/api/history` | Fetches list of all historical pipeline runs |
+| `GET` | `/api/history/{dataset_id}` | Restores full pipeline run, state, and in-memory SQLite table |
+| `GET` | `/api/suggested-questions` | Generates schema-tailored business questions |
 
 ---
 
-## 🔒 Security
+## 🧪 Testing
 
-- SQL Agent only executes `SELECT` statements — all write operations (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`) are blocked before execution
-- LLM output is validated before any database call
-- API keys are loaded from `.env` files, never hard-coded
-- In-memory SQLite — no data is persisted to disk
+Run backend unit and integration tests:
+```bash
+cd backend
+pytest tests/
+```
 
----
-
-## 📝 Sample Dataset
-
-The repo includes `brutal_data_cleaning_test.csv` — a synthetic sales dataset specifically designed to test the Data Agent's cleaning robustness. It contains:
-
-- Mixed currency formats (`$1,200.00`, `1200`, `£800`)
-- Inconsistent casing (`NORTH`, `north`, `North`)
-- Invalid dates (`2026-02-30`, ambiguous `05/01/2026`)
-- Non-numeric values in numeric columns (`"six"`, `"15O00"`)
-- Negative quantities and prices
-- Zero quantity and zero price rows
-- Duplicate records
-- Statistical outliers
+Run frontend production build verification:
+```bash
+cd frontend
+npm run build
+```
 
 ---
 
-## 🛣️ Roadmap
+## 🔒 Security & Data Integrity
 
-- [ ] LangGraph orchestration to chain agents into a full pipeline
-- [ ] Chart export (PNG/PDF)
-- [ ] Multi-file session support
-- [ ] Excel export of query results
-- [ ] Authentication + persistent sessions
-- [ ] Streaming LLM responses for SQL generation
+- **Read-Only SQL Execution**: SQL Agent generates and executes `SELECT` statements only. All mutating DDL and DML statements (`DROP`, `DELETE`, `INSERT`, `UPDATE`, `ALTER`, `TRUNCATE`) are blocked by parser-level validation.
+- **Outlier Isolation**: Statistical outliers (>3× IQR) and business-invalid rows (negative/zero prices) are segregated into audit reports so statistical models and SQL queries run on uncontaminated data.
+- **Credential Protection**: API keys are strictly parsed from local `.env` files and excluded from version control.
+- **Database Decoupling**: Persistent storage utilizes SQLAlchemy's ORM abstraction, allowing seamless transition from local SQLite to enterprise PostgreSQL with a connection string change.
 
 ---
 
@@ -292,4 +307,4 @@ The repo includes `brutal_data_cleaning_test.csv` — a synthetic sales dataset 
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License — see the [LICENSE](LICENSE) file for details.

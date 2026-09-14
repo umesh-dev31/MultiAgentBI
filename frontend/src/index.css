@@ -625,10 +625,21 @@
 .dark .bg-slate-50\/60,
 .dark .bg-slate-50\/70,
 .dark .bg-slate-50\/80,
-.dark .bg-slate-100 {
+.dark .bg-slate-100,
+.dark .bg-slate-100\/40,
+.dark .bg-slate-100\/50,
+.dark .bg-slate-100\/60,
+.dark .bg-slate-100\/70,
+.dark .bg-slate-100\/80,
+.dark .bg-slate-100\/90,
+.dark .bg-slate-100\/95,
+.dark thead.bg-slate-100\/80,
+.dark thead.bg-slate-100\/95 {
   background-color: var(--bg-surface2) !important;
 }
 .dark .bg-slate-200,
+.dark .bg-slate-200\/50,
+.dark .bg-slate-200\/80,
 .dark .bg-slate-300 {
   background-color: var(--bg-surface3) !important;
 }

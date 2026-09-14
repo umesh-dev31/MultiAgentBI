@@ -51,3 +51,11 @@ generate_multi_month_csv.py
 # Uploaded files (ephemeral)
 uploads/
 tmp/
+
+# SQLite Databases & Local Storage
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm

@@ -116,6 +116,7 @@ export interface PipelineExecutionLog {
 
 export interface PipelineRunResponse {
   status: string
+  dataset_id?: number
   filename: string
   dataset_summary: UploadResponse
   data_quality_report: DataQualityReport
@@ -126,5 +127,26 @@ export interface PipelineRunResponse {
   insight_result: any
   suggested_questions: any[]
   execution_logs: PipelineExecutionLog[]
+}
+
+export interface HistoryItem {
+  id: number
+  filename: string
+  uploaded_at: string
+  row_count: number
+  validated_row_count: number
+  flagged_count: number
+}
+
+export interface RAGSourceChunk {
+  text: string
+  chunk_type: 'audit_issue' | 'insight_summary' | string
+  dataset_id: number
+  score: number
+}
+
+export interface RAGAskResponse {
+  answer: string
+  sources: RAGSourceChunk[]
 }
 
