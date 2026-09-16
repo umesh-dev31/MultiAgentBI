@@ -1,0 +1,51 @@
+order_id,customer_name,region,product,quantity,unit_price,order_date,payment_method,city
+5001,Aditya Verma,North,Laptop,3,61000,2026-04-02,UPI,Delhi
+5002,Sunita Rao,South,Mouse,10,520,2026-04-03,Card,Chennai
+5003,MANOJ KUMAR,WEST,Keyboard,,980,2026/04/04,COD,Mumbai
+5004,Deepika Sharma,East,Monitor,1.0,"16,500",Apr 5 2026,card,Kolkata
+5005,,North,Laptop,2,62000,2026-04-06,UPI,Delhi
+5006,Ramesh Nair,West,Mouse,seven,,2026-04-07,Cash,Pune
+5007,Lalitha Bose,South,Keyboard,-1,980,2026-14-08,UPI,Bengaluru
+5008,Aditya Verma,EAST,Laptop,2,62000,2026-04-08,Card,Kolkata
+5008,Aditya Verma,EAST,Laptop,2,62000,2026-04-08,Card,Kolkata
+5010,Pradeep Iyer,West,Monitor,3,16000,2026-04-09,upi ,Mumbai
+5011,Geetha Pillai, north ,Laptop,0,62000,09-04-2026,CARD,Delhi
+5012,Suresh Patel,SOUTH,Mouse,8,-350,2026-04-10,COD,Chennai
+5013,Nandita Roy,East,Keyboard,4,980.0,2026-04-10,UPI,Kolkata
+5014,Vishal Mehta,West,Monitor,1,16000 ,not_a_date,Cash,Pune
+5015,Rekha Gupta,North,Laptop, 3 ,"$62,000",2026-04-12,Card,Delhi
+5016,Tarun Malhotra,Central,Mouse,6,520,2026-04-13,UPI,Nagpur
+5017,Smita Shah,,Keyboard,2,980,2026-04-13,,Mumbai
+5018,Kiran Mehta,South,Monitor,NaN,16000,13/04/2026,Card,Bengaluru
+5019,Divya Shah,East,Laptop,1,Infinity,2026-04-14,UPI,Kolkata
+5020,Ashok Patil,West,Mouse,5,519,2026-04-14,COD,Pune
+5021,Deepika Sharma,East,Monitor,2,16000,2026-04-15,Card,Kolkata
+5022,Sunita Rao,South,MOUSE,4,520,2026-04-15,card,Chennai
+5023,Aditya Verma,North,Laptop,3,61000,2026-04-16,UPI,Delhi
+5024,Unknown,NORTH,Keyboard,2.5,980,2026-04-16,Cash,Delhi
+5025,Zoya Ali,West,Monitor,1,16O00,2026-04-17,UPI,Mumbai
+5026,  ,South,Laptop,3,62000,2026-04-17,Card,Chennai
+5027,Harsh Jain,East,Mouse,888888,520,2026-04-18,Crypto,Kolkata
+5028,Tanvi Rao,west,Keyboard,3,980,2026-04-18,UPI,Mumbai
+5029,Mohit Kumar,North,Monitor,1,0,2026-04-19,COD,Delhi
+5030,Sara Khan,South,,5,520,2026-04-19,Card,Chennai
+5031,Riya Sen,East,Laptop,1,62000,2026-04-31,UPI,Kolkata
+5032,Aman Gupta,West,Mouse,3,520,2026-04-20,upi,Pune
+5033,Neha Verma,North,Keyboard,2,980,2026-04-20,CARD,Delhi
+5034,Suresh Patel,South,Monitor,4,16000,2026-04-21,Cash,Chennai
+5035,Nandita Roy,East,Laptop,2,62000,2026-04-21,Card,Kolkata
+5036,Vishal Mehta,West,Mouse,,520,2026-04-22,COD,Pune
+5037,Rekha Gupta,North,Keyboard,2,,2026-04-22,UPI,Delhi
+5038,Tarun Malhotra,Central,Monitor,3,16000,2026-04-23,Cash,Nagpur
+5039,Smita Shah,South ,Laptop,2,62000,2026-04-23T10:30:00,Card,Bengaluru
+5040,Kiran Mehta,East,Mouse,5,519.50,2026-04-24,UPI,Kolkata
+5041,Divya Shah,West,Keyboard,2,980,2026-04-24,COD,Mumbai
+5042,Ashok Patil,North,Monitor,3,16000,2026-04-25,Card,Delhi
+5043,Deepika Sharma,South,Laptop,2,62000,2026-04-25,UPI,Chennai
+5044,Sunita Rao,East,Mouse,5,520,2026-04-26,Cash,Kolkata
+5045,Aditya Verma,West,Keyboard,3,980,2026-04-26,Card,Pune
+5046,Geetha Pillai,North,Laptop,2,62000,2026-04-27,UPI,Delhi
+5047,Pradeep Iyer,South,Mouse,6,520,2026-04-27,COD,Chennai
+5048,Ramesh Nair,East,Monitor,3,16000,2026-04-28,Card,Kolkata
+5049,Lalitha Bose,West,Laptop,2,62000,2026-04-28,UPI,Mumbai
+5050,Manoj Kumar,North,Keyboard,4,980,2026-04-29,Card,Delhi
