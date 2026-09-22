@@ -11,13 +11,8 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    try {
-      const saved = localStorage.getItem('app_theme') as Theme | null
-      if (saved === 'dark' || saved === 'light') return saved
-    } catch {}
-    return 'dark' // default to pristine dark minimalism
-  })
+  // Workstation spec is dark-only: lock theme to avoid bright accents.
+  const [theme, setThemeState] = useState<Theme>('dark')
 
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme)
