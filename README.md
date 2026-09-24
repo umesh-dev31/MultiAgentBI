@@ -1,4 +1,4 @@
-# 🤖 AgentInsight AI — Autonomous Multi-Agent Business Intelligence Platform
+# AgentInsight AI — Autonomous Multi-Agent Business Intelligence Platform
 
 <div align="center">
 
@@ -17,13 +17,13 @@
 
 ---
 
-## 📸 Overview
+## Overview
 
 AgentInsight AI is an autonomous, full-stack multi-agent platform that transforms raw, messy business datasets into clean, actionable intelligence. Orchestrated by **LangGraph**, each agent is a specialized Python module executing bounded tasks with strict validation guarantees.
 
 The platform includes **SQLAlchemy-backed persistent storage** (PostgreSQL-compatible, SQLite local demo) for historical runs and a **RAG Knowledge Agent** that indexes audit logs and analytical summaries for instant, grounded natural-language answers with source citations.
 
-### 🧩 Multi-Agent Architecture
+### Multi-Agent Architecture
 
 ```
                                ┌─────────────────────────┐
@@ -74,58 +74,58 @@ The platform includes **SQLAlchemy-backed persistent storage** (PostgreSQL-compa
 
 ---
 
-## ✨ Features & Agents
+## Features & Agents
 
-### 1. 🧹 Data Agent — Autonomous Data Cleaning & Normalization
+### 1. Data Agent — Autonomous Data Cleaning & Normalization
 - Detects and strips currency symbols (`$`, `€`, `£`, `₹`), thousands commas, and whitespace.
 - Normalizes casing on low-cardinality categorical columns while preserving customer names and free text.
 - Parses complex/ambiguous date formats (DD/MM/YYYY, ISO-8601, regional strings).
 - Performs intelligent imputation (median for numeric, mode for categorical) exclusively on genuine nulls.
 
-### 2. 🛡️ Validation Agent — Strict Quality Assurance & Isolation
+### 2. Validation Agent — Strict Quality Assurance & Isolation
 - Evaluates data against strict business rules (flags negative prices/quantities, zero values, and calendar impossibilities like Feb 30).
 - Isolates problem rows into a pristine `AuditReport` while ensuring downstream agents only compute on certified, uncontaminated data.
 - Generates detailed issue logs: row index, column name, raw value, and human-readable reason.
 
-### 3. 📊 EDA Agent — Exploratory Data Analysis
+### 3. EDA Agent — Exploratory Data Analysis
 - Computes comprehensive descriptive statistics on validated subsets (mean, median, standard deviation, quartiles, min/max).
 - Calculates categorical distributions with top-value breakdowns.
 - Computes a Pearson correlation matrix across numeric features.
 - Aggregates monthly revenue and volume trends for temporal analysis.
 
-### 4. 🤖 ML Agent — Machine Learning Anomaly Detection & Forecasting
+### 4. ML Agent — Machine Learning Anomaly Detection & Forecasting
 - **Per-Category Normalized Isolation Forest**: Detects statistical anomalies relative to category peers rather than global distributions, avoiding false positives on inherently high-value items.
 - Provides plain-English explanations for every flagged anomaly with percentage deviations.
 - **Trend Forecasting**: Linear regression modeling on historical monthly periods with dynamic confidence levels (`high`, `medium`, `insufficient`).
 
-### 5. 📈 Visualization Agent — Autonomous Chart Generation
+### 5. Visualization Agent — Autonomous Chart Generation
 - Translates statistical distributions into recommended charts (bar, line, scatter, pie, heatmap).
 - Emits schema-compliant chart configurations rendered natively with responsive SVG.
 
-### 6. 💡 Insight Agent — Executive Synthesis & Strategic Recommendations
+### 6. Insight Agent — Executive Synthesis & Strategic Recommendations
 - Synthesizes findings across EDA, ML, and Validation into an Executive Summary.
 - Delivers prioritized business recommendations, operational risks, and growth opportunities.
 
-### 7. 🗣️ SQL Agent — Text-to-SQL with In-Memory Execution
+### 7. SQL Agent — Text-to-SQL with In-Memory Execution
 - Translates natural-language questions (e.g., *"What is the total sales amount per month?"*) into safe, read-only SQLite `SELECT` queries.
 - Powered by the **Groq LLM API** with automatic self-correction retries.
 - Enforces strict security: blocks `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, and `CREATE`.
 
-### 8. 🧠 RAG Knowledge Agent — Semantic Question Answering over Analyses
+### 8. RAG Knowledge Agent — Semantic Question Answering over Analyses
 - Indexes flagged audit issues and analytical summaries into a structured knowledge base.
 - Uses **scikit-learn TF-IDF vectorization + cosine similarity** with exact row-number match boosting.
 - Answers questions like *"Why was row 13 flagged?"* or *"What data quality issues were found?"*.
 - Dual retrieval scope: query within the **Current Dataset** or across **All Historical Uploads**.
 - Displays expandable evidence drawer with similarity scores, chunk types, and citations.
 
-### 9. 🗄️ Persistent Storage & History
+### 9. Persistent Storage & History
 - Built with **SQLAlchemy ORM** connected to a SQLite database (`backend/data/agentinsight.db`), fully architected for drop-in PostgreSQL migration.
 - Persists datasets, complete pipeline runs (EDA, ML, Insights, Visualizations, Cleaned & Validated Data), audit issues, and RAG knowledge chunks.
 - Dedicated **History Tab** allows users to review past uploads and restore any historical session into the live analytical workspace with 1 click.
 
 ---
 
-## 🏗️ Tech Stack
+## Tech Stack
 
 | Layer | Technology | Description |
 |-------|-----------|-------------|
@@ -191,7 +191,7 @@ insight/
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - **Python 3.11+**
@@ -290,7 +290,7 @@ npm run build
 
 ---
 
-## 🔒 Security & Data Integrity
+## Security & Data Integrity
 
 - **Read-Only SQL Execution**: SQL Agent generates and executes `SELECT` statements only. All mutating DDL and DML statements (`DROP`, `DELETE`, `INSERT`, `UPDATE`, `ALTER`, `TRUNCATE`) are blocked by parser-level validation.
 - **Outlier Isolation**: Statistical outliers (>3× IQR) and business-invalid rows (negative/zero prices) are segregated into audit reports so statistical models and SQL queries run on uncontaminated data.
@@ -299,7 +299,7 @@ npm run build
 
 ---
 
-## 👤 Author
+## Author
 
 **Umesh** — [@umesh-dev31](https://github.com/umesh-dev31)
 
