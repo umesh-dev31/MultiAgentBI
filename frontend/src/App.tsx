@@ -20,7 +20,7 @@ import type {
   PipelineRunResponse,
 } from './types/data'
 
-const BACKEND_URL = 'http://localhost:8000'
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
 
 type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
 type AppView = 'landing' | 'dashboard'
@@ -69,11 +69,15 @@ function App() {
         const res = await fetch(`${BACKEND_URL}/health`, { signal: controller.signal })
         ok = res.ok
       } catch {
-        // Fallback to 127.0.0.1 if localhost IPv6 resolution fails on Windows
-        try {
-          const fallbackRes = await fetch('http://127.0.0.1:8000/health', { signal: controller.signal })
-          ok = fallbackRes.ok
-        } catch {
+        // Fallback to 127.0.0.1 only in local dev (VITE_BACKEND_URL is set)
+        if (import.meta.env.VITE_BACKEND_URL) {
+          try {
+            const fallbackRes = await fetch('http://127.0.0.1:8000/health', { signal: controller.signal })
+            ok = fallbackRes.ok
+          } catch {
+            ok = false
+          }
+        } else {
           ok = false
         }
       } finally {

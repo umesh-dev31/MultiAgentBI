@@ -32,7 +32,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Configure CORS to permit requests from Vite default dev server
+# Configure CORS to permit requests from Vite default dev server and Vercel deployments
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -45,7 +45,7 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?|https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

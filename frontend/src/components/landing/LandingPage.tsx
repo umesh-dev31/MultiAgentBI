@@ -173,21 +173,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     const pingHealth = async () => {
       const t0 = performance.now()
       try {
-        const res = await fetch('http://localhost:8000/health')
+        const res = await fetch('/health')
         if (res.ok && isMounted) {
           const t1 = performance.now()
           setMeasuredLatency(Math.max(1, Math.round(t1 - t0)))
         }
       } catch {
-        try {
-          const res2 = await fetch('http://127.0.0.1:8000/health')
-          if (res2.ok && isMounted) {
-            const t1 = performance.now()
-            setMeasuredLatency(Math.max(1, Math.round(t1 - t0)))
-          }
-        } catch {
-          if (isMounted) setMeasuredLatency(null)
-        }
+        if (isMounted) setMeasuredLatency(null)
       }
     }
     pingHealth()

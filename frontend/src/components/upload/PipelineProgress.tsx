@@ -77,7 +77,7 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
   logs,
   fileName,
   runId,
-  backendUrl = 'http://localhost:8000',
+  backendUrl = '',
 }) => {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
