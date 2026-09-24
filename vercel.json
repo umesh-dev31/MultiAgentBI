@@ -6,10 +6,7 @@
     },
     "backend": {
       "root": "backend",
-      "entrypoint": "main:app",
-      "env": {
-        "VERCEL": "1"
-      }
+      "entrypoint": "main:app"
     }
   },
   "rewrites": [

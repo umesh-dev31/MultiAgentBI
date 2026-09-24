@@ -3,9 +3,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # On Vercel the filesystem is read-only except for /tmp.
-# Detect Vercel via the VERCEL env var and use /tmp accordingly.
-if os.getenv("VERCEL"):
-    DATA_DIR = "/tmp"
+# Vercel automatically sets VERCEL=1 in all serverless functions.
+_is_serverless = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+
+if _is_serverless:
     DB_PATH = "/tmp/agentinsight.db"
 else:
     BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

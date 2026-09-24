@@ -1,9 +1,10 @@
 fastapi
 uvicorn[standard]
 python-multipart
-langchain
 langgraph
+langchain-core
 pandas
+numpy
 python-dotenv
 openpyxl
 anthropic
