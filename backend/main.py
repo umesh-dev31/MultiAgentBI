@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware

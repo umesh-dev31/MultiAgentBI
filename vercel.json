@@ -6,10 +6,20 @@
     },
     "backend": {
       "root": "backend",
-      "entrypoint": "main:app"
+      "entrypoint": "main:app",
+      "env": {
+        "VERCEL": "1"
+      }
     }
   },
   "rewrites": [
+    {
+      "source": "/health",
+      "destination": {
+        "type": "service",
+        "service": "backend"
+      }
+    },
     {
       "source": "/api/(.*)?",
       "destination": {
@@ -25,4 +35,4 @@
       }
     }
   ]
-}
+}

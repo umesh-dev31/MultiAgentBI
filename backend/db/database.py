@@ -2,12 +2,17 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Locate backend/data directory
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BACKEND_DIR, "data")
-os.makedirs(DATA_DIR, exist_ok=True)
+# On Vercel the filesystem is read-only except for /tmp.
+# Detect Vercel via the VERCEL env var and use /tmp accordingly.
+if os.getenv("VERCEL"):
+    DATA_DIR = "/tmp"
+    DB_PATH = "/tmp/agentinsight.db"
+else:
+    BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_DIR = os.path.join(BACKEND_DIR, "data")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    DB_PATH = os.path.join(DATA_DIR, "agentinsight.db")
 
-DB_PATH = os.path.join(DATA_DIR, "agentinsight.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
 # check_same_thread is needed only for SQLite
