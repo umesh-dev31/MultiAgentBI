@@ -2,15 +2,6 @@
 
 <div align="center">
 
-![AgentInsight AI](https://img.shields.io/badge/AgentInsight-AI-6366f1?style=for-the-badge&logo=robot&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![LangGraph](https://img.shields.io/badge/LangGraph-Orchestrated-FF6F00?style=for-the-badge&logo=diagram-next&logoColor=white)
-![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-PostgreSQL%20Compatible-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white)
-![React](https://img.shields.io/badge/React-19+-61DAFB?style=for-the-badge&logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
-![scikit-learn](https://img.shields.io/badge/scikit--learn-ML%20%26%20RAG-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)
-
 **Upload a messy CSV → get instant AI-powered data cleaning, statistical analysis, interactive visualizations, executive recommendations, natural-language SQL queries, ML anomaly detection, persistent history, and RAG-powered knowledge retrieval.**
 
 </div>
@@ -260,7 +251,7 @@ Navigate to **http://localhost:5173** in your browser.
 
 ---
 
-## 📊 API Endpoints
+## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -274,7 +265,7 @@ Navigate to **http://localhost:5173** in your browser.
 
 ---
 
-## 🧪 Testing
+## Testing
 
 Run backend unit and integration tests:
 ```bash
