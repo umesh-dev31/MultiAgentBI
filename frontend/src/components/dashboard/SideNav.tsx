@@ -1,4 +1,5 @@
 import React from 'react'
+import { Logo } from '../Logo'
 
 type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
 
@@ -122,28 +123,17 @@ export const SideNav: React.FC<SideNavProps> = ({
           display: 'flex',
           alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'space-between',
+          flexDirection: collapsed ? 'column' : 'row',
+          gap: collapsed ? 8 : 0,
           padding: collapsed ? '16px 0' : '16px 14px 16px 16px',
           borderBottom: '1px solid var(--border-subtle)',
           flexShrink: 0,
         }}
       >
+        {collapsed && <Logo size="xs" />}
         {!collapsed && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 5,
-                border: '1px solid var(--border-medium)',
-                background: 'var(--border-subtle)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <span style={{ width: 8, height: 8, background: 'var(--text-primary)', borderRadius: 2 }} />
-            </div>
+            <Logo size="sm" />
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>
                 AgentInsight

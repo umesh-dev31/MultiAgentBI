@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { SideNav } from './SideNav'
+import { Logo, LogoWithWordmark } from '../Logo'
 import { RightInspector } from './RightInspector'
 import { ThemeToggle } from '../ThemeToggle'
 import type { PipelineExecutionLog, UploadResponse } from '../../types/data'
@@ -71,40 +72,9 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           title="Back to Landing Page"
         >
           {navCollapsed ? (
-            <div
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 6,
-                background: 'var(--border-subtle)',
-                border: '1px solid var(--border-medium)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <span style={{ width: 10, height: 10, background: 'var(--text-primary)', borderRadius: 2 }} />
-            </div>
+            <Logo size="sm" />
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: 5,
-                  border: '1px solid var(--border-medium)',
-                  background: 'var(--border-subtle)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <span style={{ width: 8, height: 8, background: 'var(--text-primary)', borderRadius: 2 }} />
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-                AgentInsight <span style={{ color: 'var(--text-muted)' }}>AI</span>
-              </span>
-            </div>
+            <LogoWithWordmark size="sm" />
           )}
         </div>
 
