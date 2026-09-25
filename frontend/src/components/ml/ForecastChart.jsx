@@ -126,7 +126,9 @@ export const ForecastChart = ({ forecastData }) => {
       {/* Honest Confidence Warning Banner */}
       {isLowConfidence && (
         <div className="p-3.5 rounded-xl bg-amber-50/80 border border-amber-200 text-amber-900 flex items-start gap-2.5 shadow-2xs">
-          <span className="text-amber-500 text-base shrink-0 mt-0.5">⚠️</span>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0, marginTop: 1, color: '#d97706' }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
           <div>
             <h5 className="font-bold text-xs uppercase tracking-wide text-amber-800">
               Limited Historical Baseline Notice

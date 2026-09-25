@@ -291,8 +291,11 @@ function App() {
                   gap: 14,
                 }}
               >
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-                  ✅ Dataset "{activeFileName}" processed — where would you like to go?
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#22c55e" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Dataset "{activeFileName}" processed — where would you like to go?
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {([
@@ -320,7 +323,12 @@ function App() {
                       onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = `${color}28` }}
                       onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = `${color}18` }}
                     >
-                      {label} →
+                      <>
+                        {label}
+                        <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                        </svg>
+                      </>
                     </button>
                   ))}
                 </div>
@@ -386,8 +394,11 @@ function App() {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn-primary" onClick={() => setActiveTab('sql')}>
-                Proceed to Ask a Question →
+              <button className="btn-primary" onClick={() => setActiveTab('sql')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                Proceed to Ask a Question
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                </svg>
               </button>
             </div>
           </div>
@@ -437,8 +448,11 @@ function App() {
             </div>
             <MLInsightsView backendUrl={BACKEND_URL} disabled={!hasData} hasData={hasData} initialData={mlResult} />
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn-primary" onClick={() => setActiveTab('insights')}>
-                Proceed to Business Summary →
+              <button className="btn-primary" onClick={() => setActiveTab('insights')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                Proceed to Business Summary
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                </svg>
               </button>
             </div>
           </div>
@@ -489,7 +503,11 @@ function App() {
         {/* ── Empty / No data state for locked tabs ─────────────────── */}
         {!hasData && activeTab !== 'upload' && activeTab !== 'history' && (
           <div className="empty-state">
-            <div className="empty-state-icon">📂</div>
+            <div className="empty-state-icon">
+              <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ margin: '0 auto', opacity: 0.4 }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
+              </svg>
+            </div>
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-secondary)' }}>No dataset loaded</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 280 }}>
               Upload a CSV on the Upload tab or select a run from the History tab to unlock this view.

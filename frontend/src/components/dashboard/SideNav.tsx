@@ -1,5 +1,4 @@
 import React from 'react'
-import { Logo } from '../Logo'
 
 type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
 
@@ -8,7 +7,6 @@ interface SideNavProps {
   onTabChange: (tab: ActiveTab) => void
   hasData: boolean
   collapsed: boolean
-  onCollapse: () => void
   onLanding: () => void
   backendOnline: boolean | null
   activeFileName?: string
@@ -106,7 +104,6 @@ export const SideNav: React.FC<SideNavProps> = ({
   onTabChange,
   hasData,
   collapsed,
-  onCollapse,
   onLanding,
   backendOnline,
   activeFileName,
@@ -117,69 +114,6 @@ export const SideNav: React.FC<SideNavProps> = ({
 
   return (
     <nav className="dashboard-sidenav" style={{ fontFamily: 'var(--font-sans)' }}>
-      {/* Logo + Collapse Toggle */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: collapsed ? 'center' : 'space-between',
-          flexDirection: collapsed ? 'column' : 'row',
-          gap: collapsed ? 8 : 0,
-          padding: collapsed ? '16px 0' : '16px 14px 16px 16px',
-          borderBottom: '1px solid var(--border-subtle)',
-          flexShrink: 0,
-        }}
-      >
-        {collapsed && <Logo size="xs" />}
-        {!collapsed && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Logo size="sm" />
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>
-                AgentInsight
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
-                Multi-Agent BI
-              </div>
-            </div>
-          </div>
-        )}
-
-        <button
-          onClick={onCollapse}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 6,
-            border: '1px solid var(--border-subtle)',
-            background: 'transparent',
-            color: 'var(--text-muted)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'background 0.15s, color 0.15s',
-            flexShrink: 0,
-          }}
-          onMouseEnter={e => {
-            ;(e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-surface2)'
-            ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)'
-          }}
-          onMouseLeave={e => {
-            ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-            ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'
-          }}
-        >
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            {collapsed ? (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            ) : (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            )}
-          </svg>
-        </button>
-      </div>
 
       {/* Active file badge */}
       {!collapsed && activeFileName && (

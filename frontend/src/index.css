@@ -81,6 +81,12 @@
   --radius-md:       8px;
   --radius-lg:       12px;
   --radius-xl:       16px;
+
+  /* Brand Logo Tokens - Dark Mode */
+  --logo-bg:         #18181b;
+  --logo-border:     #27272a;
+  --logo-bar-muted:  #71717a;
+  --logo-bar-accent: #34d399;
 }
 
 /* ─── Light Mode Tokens (Crisp, High-Legibility, High-Contrast) ─────────── */
@@ -97,6 +103,12 @@
   --border-medium:   #cbd5e1;
   --border-strong:   #94a3b8;
   --border-glow:     #64748b;
+
+  /* Brand Logo Tokens - Light / White Mode */
+  --logo-bg:         #ffffff;
+  --logo-border:     #cbd5e1;
+  --logo-bar-muted:  #94a3b8;
+  --logo-bar-accent: #10b981;
 
   --glass-specular:  none;
   --glass-shadow:    0 1px 3px 0 rgba(0, 0, 0, 0.08), 0 1px 2px -1px rgba(0, 0, 0, 0.08);
@@ -261,6 +273,32 @@
 }
 .dashboard-shell.nav-collapsed.inspector-closed {
   grid-template-columns: var(--nav-collapsed) 1fr 0px;
+}
+
+/* App Logo Theme Rules */
+.app-logo {
+  transition: transform 0.2s ease;
+}
+.app-logo rect {
+  transition: fill 0.25s ease, stroke 0.25s ease;
+}
+:root.light .app-logo rect:first-child,
+[data-theme="light"] .app-logo rect:first-child {
+  fill: #ffffff !important;
+}
+:root.light .app-logo rect:nth-child(2),
+[data-theme="light"] .app-logo rect:nth-child(2) {
+  stroke: #cbd5e1 !important;
+}
+:root.light .app-logo rect:nth-child(3),
+:root.light .app-logo rect:nth-child(4),
+[data-theme="light"] .app-logo rect:nth-child(3),
+[data-theme="light"] .app-logo rect:nth-child(4) {
+  fill: #94a3b8 !important;
+}
+:root.light .app-logo rect:nth-child(5),
+[data-theme="light"] .app-logo rect:nth-child(5) {
+  fill: #10b981 !important;
 }
 
 /* Minimalist Topbar */

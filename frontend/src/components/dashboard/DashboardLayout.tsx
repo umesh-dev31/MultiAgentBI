@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { SideNav } from './SideNav'
-import { Logo, LogoWithWordmark } from '../Logo'
+import { Logo } from '../Logo'
 import { RightInspector } from './RightInspector'
 import { ThemeToggle } from '../ThemeToggle'
 import type { PipelineExecutionLog, UploadResponse } from '../../types/data'
@@ -55,28 +55,82 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
     <div className={shellClass}>
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <header className="dashboard-topbar">
-        {/* Left: brand logo area (matches nav width) */}
-        <div
-          onClick={onLanding}
+        {/* Left: brand logo area & sidebar toggle (matches nav width) */}
+        <button
+          type="button"
+          onClick={() => setNavCollapsed(p => !p)}
+          title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           style={{
             width: navCollapsed ? 'var(--nav-collapsed)' : 'var(--nav-width)',
             flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
+            justifyContent: 'space-between',
             height: '100%',
             borderRight: '1px solid var(--border-subtle)',
-            transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+            borderTop: 'none',
+            borderLeft: 'none',
+            borderBottom: 'none',
+            background: 'transparent',
+            transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s ease',
             cursor: 'pointer',
+            overflow: 'hidden',
+            paddingLeft: navCollapsed ? 20 : 16,
+            paddingRight: navCollapsed ? 0 : 14,
+            boxSizing: 'border-box',
+            textAlign: 'left',
           }}
-          title="Back to Landing Page"
+          onMouseEnter={e => {
+            ;(e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-surface2)'
+          }}
+          onMouseLeave={e => {
+            ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+          }}
         >
-          {navCollapsed ? (
+          <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
             <Logo size="sm" />
-          ) : (
-            <LogoWithWordmark size="sm" />
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                letterSpacing: '-0.01em',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                display: 'inline-block',
+                maxWidth: navCollapsed ? 0 : 140,
+                opacity: navCollapsed ? 0 : 1,
+                marginLeft: navCollapsed ? 0 : 10,
+                transform: navCollapsed ? 'translateX(-8px)' : 'translateX(0)',
+                transition:
+                  'max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                pointerEvents: 'none',
+              }}
+            >
+              AgentInsight AI
+            </span>
+          </div>
+
+          {!navCollapsed && (
+            <svg
+              width="14"
+              height="14"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              style={{
+                color: 'var(--text-muted)',
+                flexShrink: 0,
+                opacity: 0.6,
+                transition: 'opacity 0.15s ease',
+              }}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
           )}
-        </div>
+        </button>
 
         {/* Center: breadcrumb / active tab label */}
         <div style={{ flex: 1, padding: '0 18px', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
@@ -137,7 +191,9 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 boxShadow: '0 0 14px rgba(239,68,68,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
               }}
             >
-              <span>⚠</span>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0, color: '#f87171' }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
               <span
                 style={{
                   overflow: 'hidden',
@@ -197,7 +253,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         onTabChange={onTabChange}
         hasData={hasData}
         collapsed={navCollapsed}
-        onCollapse={() => setNavCollapsed(p => !p)}
         onLanding={onLanding}
         backendOnline={backendOnline}
         activeFileName={activeFileName}

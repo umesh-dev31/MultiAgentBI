@@ -25,8 +25,8 @@ function ChunkAppearList({ chunks, visible }) {
   if (!visible) return null
 
   const typeColors = {
-    audit_issue: { bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.3)', label: '#f59e0b', tag: 'Audit Issue', icon: '🔍' },
-    insight_summary: { bg: 'rgba(99,102,241,0.08)', border: 'rgba(99,102,241,0.3)', label: 'var(--accent-indigo)', tag: 'Executive Insight', icon: '💡' },
+    audit_issue: { bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.3)', label: '#f59e0b', tag: 'Audit Issue', icon: 'search' },
+    insight_summary: { bg: 'rgba(99,102,241,0.08)', border: 'rgba(99,102,241,0.3)', label: 'var(--accent-indigo)', tag: 'Executive Insight', icon: 'lightbulb' },
   }
 
   return (
@@ -157,7 +157,9 @@ function StageIndicator({ stage, label, doneLabel, description, active, done }) 
             animation: 'spin 0.7s linear infinite',
           }} />
         ) : done ? (
-          <span style={{ fontSize: 13, lineHeight: 1 }}>✓</span>
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
         ) : (
           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>{stage}</span>
         )}
@@ -361,7 +363,9 @@ export const AskQuestionView = ({
               fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s ease',
             }}
           >
-            <span>📊</span>
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 6h18M3 14h18M3 18h18" />
+            </svg>
             <span>Query Data (SQL Agent)</span>
           </button>
 
@@ -376,7 +380,9 @@ export const AskQuestionView = ({
               fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s ease',
             }}
           >
-            <span>🧠</span>
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
             <span>Ask About This Analysis (RAG Agent)</span>
           </button>
         </div>
@@ -544,7 +550,9 @@ export const AskQuestionView = ({
               ) : (
                 <>
                   <span>Ask Knowledge Agent</span>
-                  <span>→</span>
+                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                  </svg>
                 </>
               )}
             </button>
@@ -575,7 +583,10 @@ export const AskQuestionView = ({
           {/* Error */}
           {ragError && (
             <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444', fontSize: 13 }}>
-              ⚠ {ragError}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              {ragError}
             </div>
           )}
 
@@ -603,12 +614,15 @@ export const AskQuestionView = ({
                   <div
                     style={{
                       width: 32, height: 32, borderRadius: 8,
-                      background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      background: 'var(--bg-surface2)',
+                      border: '1px solid var(--border-subtle)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 16,
+                      flexShrink: 0,
                     }}
                   >
-                    🧠
+                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="var(--text-secondary)" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
                   </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -627,7 +641,10 @@ export const AskQuestionView = ({
                       border: '1px solid rgba(16,185,129,0.3)',
                     }}
                   >
-                    ✓ {ragResult.sources?.length || 0} Sources Cited
+                    <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    {ragResult.sources?.length || 0} Sources Cited
                   </span>
                 )}
               </div>
@@ -690,7 +707,9 @@ export const AskQuestionView = ({
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                      <span style={{ fontSize: 15 }}>💡</span>
+                      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="var(--text-secondary)" strokeWidth={1.8} style={{ flexShrink: 0 }}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                      </svg>
                       <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Grounded Knowledge Answer</span>
                     </div>
                     <div
@@ -720,7 +739,9 @@ export const AskQuestionView = ({
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 13 }}>🔍</span>
+                          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="var(--text-secondary)" strokeWidth={2} style={{ flexShrink: 0 }}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
                           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
                             Sources Used
                           </span>
@@ -746,7 +767,9 @@ export const AskQuestionView = ({
                             </span>
                           )}
                         </div>
-                        <span style={{ fontSize: 12, color: 'var(--text-muted)', transform: sourcesOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
+                        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--text-muted)" strokeWidth={2} style={{ transform: sourcesOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
                       </button>
 
                       {sourcesOpen && (
@@ -778,7 +801,7 @@ export const AskQuestionView = ({
                                         border: `1px solid ${isAudit ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.25)'}`,
                                       }}
                                     >
-                                      {isAudit ? '🔍 Audit Issue' : '💡 Executive Insight'}
+                                      {isAudit ? 'Audit Issue' : 'Executive Insight'}
                                     </span>
                                     <span
                                       style={{

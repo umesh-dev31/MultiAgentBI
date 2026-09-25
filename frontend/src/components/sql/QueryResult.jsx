@@ -103,7 +103,10 @@ export const QueryResult = ({
 
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2 py-0.5 rounded-full">
-              ✓ Validated SELECT
+              <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ flexShrink: 0, display: 'inline', verticalAlign: 'middle' }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              {' '}Validated SELECT
             </span>
             <button
               onClick={handleCopySql}
@@ -112,7 +115,9 @@ export const QueryResult = ({
             >
               {copied ? (
                 <>
-                  <span className="text-emerald-400">✓</span>
+                  <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} className="text-emerald-400" style={{ flexShrink: 0 }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
                   <span>Copied</span>
                 </>
               ) : (
@@ -158,7 +163,9 @@ export const QueryResult = ({
 
         {columns.length === 0 || row_count === 0 ? (
           <div className="p-12 text-center text-slate-500 text-xs space-y-1">
-            <span className="text-2xl block mb-2">🔍</span>
+            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ margin: '0 auto 8px', display: 'block', opacity: 0.35 }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
             <p className="font-semibold text-slate-700">No records found</p>
             <p>The query executed successfully but matched zero rows in the dataset.</p>
           </div>

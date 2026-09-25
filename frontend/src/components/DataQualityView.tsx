@@ -322,9 +322,12 @@ export const DataQualityView: React.FC<DataQualityViewProps> = ({
           <button
             onClick={onProceed}
             className="btn-primary"
-            style={{ fontSize: 12, padding: '7px 14px' }}
+            style={{ fontSize: 12, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            Proceed to Exploration →
+            Proceed to Exploration
+            <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+            </svg>
           </button>
         </div>
       </div>
@@ -532,7 +535,10 @@ export const DataQualityView: React.FC<DataQualityViewProps> = ({
                   </span>
                 </div>
                 <span style={{ fontSize: 11, color: 'var(--color-success-text)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  ✓ Safe & Verified
+                  <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ flexShrink: 0 }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  Safe &amp; Verified
                 </span>
               </div>
 
@@ -1206,8 +1212,11 @@ export const DataQualityView: React.FC<DataQualityViewProps> = ({
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
           Tip: You can switch between <strong>Audit</strong>, <strong>Data Preview</strong>, and <strong>Schema</strong> tabs above without losing your place.
         </span>
-        <button className="btn-primary" onClick={onProceed}>
-          Proceed to Exploration →
+        <button className="btn-primary" onClick={onProceed} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          Proceed to Exploration
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+          </svg>
         </button>
       </div>
     </div>

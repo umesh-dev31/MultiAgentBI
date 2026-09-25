@@ -222,7 +222,9 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
                   }`}
                 >
                   {isCompleted && !isCurrent ? (
-                    <span className="inline-block animate-in fade-in zoom-in duration-300 font-bold">✓</span>
+                    <svg className="inline-block animate-in fade-in zoom-in duration-300" width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
                   ) : isCurrent ? (
                     <span className={`w-3 h-3 rounded-full border-2 border-t-transparent animate-spin ${isDark ? 'border-black' : 'border-white'}`} />
                   ) : (
@@ -262,7 +264,10 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
                     <p className={`text-xs mt-1 font-mono font-medium animate-pulse ${
                       isDark ? 'text-amber-300/90' : 'text-amber-700'
                     }`}>
-                      ⚡ {activeLabel}
+                      <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ display: 'inline', verticalAlign: 'middle', flexShrink: 0 }}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      {' '}{activeLabel}
                     </p>
                   )}
 

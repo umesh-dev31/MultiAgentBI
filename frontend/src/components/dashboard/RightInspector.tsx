@@ -277,9 +277,21 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                   {agent.status === 'running' && (
                     <span style={{ width: 7, height: 7, borderRadius: '50%', border: '1.5px solid currentColor', borderTopColor: 'transparent', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />
                   )}
-                  {agent.status === 'done'    && '✓'}
-                  {agent.status === 'error'   && '✗'}
-                  {agent.status === 'idle'    && '○'}
+                  {agent.status === 'done' && (
+                    <svg width="9" height="9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ flexShrink: 0 }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  {agent.status === 'error' && (
+                    <svg width="9" height="9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ flexShrink: 0 }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  )}
+                  {agent.status === 'idle' && (
+                    <svg width="8" height="8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                      <circle cx="12" cy="12" r="9" />
+                    </svg>
+                  )}
                   {agent.status !== 'idle' && agent.duration && (
                     <span style={{ opacity: 0.8, fontSize: 9, marginLeft: 2 }}>{agent.duration}</span>
                   )}
@@ -309,7 +321,21 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                     )}
                     <br />
                     <span className={log.status === 'success' ? 'log-ok' : 'log-err'}>
-                      {log.status === 'success' ? '✓ success' : `✗ ${log.status}`}
+                      {log.status === 'success' ? (
+                        <>
+                          <svg width="9" height="9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ flexShrink: 0, display: 'inline', verticalAlign: 'middle' }}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                          {' success'}
+                        </>
+                      ) : (
+                        <>
+                          <svg width="9" height="9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ flexShrink: 0, display: 'inline', verticalAlign: 'middle' }}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          {` ${log.status}`}
+                        </>
+                      )}
                     </span>
                   </div>
                 ))}

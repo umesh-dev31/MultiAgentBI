@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { DataHealthScoreGauge } from '../DataHealthScoreGauge'
+import { Logo } from '../Logo'
 
 export const ExecutiveSummary = ({ summary, keyFinding, recommendation, dataHealthScore }) => {
   const [copied, setCopied] = useState(false)
@@ -16,9 +17,7 @@ export const ExecutiveSummary = ({ summary, keyFinding, recommendation, dataHeal
       {/* Header & Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white flex items-center justify-center text-lg shadow-sm">
-            📊
-          </div>
+          <Logo size="md" />
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-base font-bold text-slate-900 tracking-tight">
@@ -44,12 +43,16 @@ export const ExecutiveSummary = ({ summary, keyFinding, recommendation, dataHeal
           >
             {copied ? (
               <>
-                <span className="text-emerald-600 font-bold">✓</span>
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} className="text-emerald-600" style={{ flexShrink: 0 }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
                 <span className="text-emerald-700">Copied to Clipboard</span>
               </>
             ) : (
               <>
-                <span>📋</span>
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
                 <span>Copy Briefing</span>
               </>
             )}

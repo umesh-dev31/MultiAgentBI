@@ -1,25 +1,46 @@
 import React, { useEffect, useState, useCallback } from 'react'
 
+const ICON_LIST = (
+  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+  </svg>
+)
+const ICON_COUNT = (
+  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+  </svg>
+)
+const ICON_CHART = (
+  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+  </svg>
+)
+const ICON_SEARCH = (
+  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+  </svg>
+)
+
 const DEFAULT_FALLBACKS = [
   {
     title: 'Show me the first 10 rows',
     description: 'Displays initial 10 records from the active table',
-    icon: '📋',
+    icon: ICON_LIST,
   },
   {
     title: 'What is the total number of records?',
     description: 'Counts total rows loaded in the current dataset',
-    icon: '🔢',
+    icon: ICON_COUNT,
   },
   {
     title: 'What are the column summary statistics?',
     description: 'Computes aggregate ranges and distribution metrics',
-    icon: '📊',
+    icon: ICON_CHART,
   },
   {
     title: 'Find any records with missing values',
     description: 'Scans columns for null or unpopulated entries',
-    icon: '🔍',
+    icon: ICON_SEARCH,
   },
 ]
 
@@ -96,7 +117,9 @@ export const ExampleQuestions = ({
             className="text-[11px] font-medium text-slate-500 hover:text-indigo-600 transition flex items-center gap-1 cursor-pointer disabled:opacity-40"
             title="Generate new suggestions"
           >
-            <span>↻</span>
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
             <span>Refresh</span>
           </button>
         )}
@@ -129,8 +152,8 @@ export const ExampleQuestions = ({
               className="flex flex-col text-left p-3 rounded-xl bg-white border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/40 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed group shadow-xs"
             >
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-base group-hover:scale-110 transition-transform">
-                  {ex.icon || '📊'}
+                <span className="flex items-center text-slate-500 group-hover:scale-110 transition-transform">
+                  {ex.icon || ICON_CHART}
                 </span>
                 <span className="text-xs font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
                   {ex.title}
