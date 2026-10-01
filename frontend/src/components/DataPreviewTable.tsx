@@ -56,8 +56,8 @@ export const DataPreviewTable: React.FC<DataPreviewTableProps> = ({
                 key={rowIndex}
                 className="hover:bg-slate-800/30 transition-colors"
               >
-                <td className="py-2.5 px-4 text-center font-mono text-slate-500 text-xs bg-slate-950/30">
-                  {rowIndex + 1}
+                <td className="py-2.5 px-4 text-center font-mono text-slate-500 text-xs bg-slate-950/30" title="Original file row number">
+                  {row._file_row_number ?? rowIndex + 2}
                 </td>
                 {columnNames.map((col) => {
                   const val = row[col]

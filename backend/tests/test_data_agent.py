@@ -280,6 +280,44 @@ class TestDataAgent(unittest.TestCase):
         self.assertEqual(degraded_health["label"], "Needs Review")
         self.assertEqual(degraded_health["color"], "red")
 
+    def test_exact_original_file_row_numbers_flagged(self):
+        """Verify that rows flagged for review match original spreadsheet row numbers (1-based, including header).
+        Specifically: Row 5 (array index 3) and Row 10 (array index 8) must be flagged as #5 and #10, NOT #3 and #8.
+        """
+        csv_path = os.path.join(self.temp_dir, "row_number_test.csv")
+        csv_content = """order_id,order_date,customer_name,city,region,payment_method,quantity,unit_price
+1001,2026-01-01,Alice,New York,North,Credit Card,2,50.00
+1002,2026-01-02,Bob,San Francisco,North,Credit Card,3,50.00
+1003,2026-01-03,Charlie,Los Angeles,South,Cash,4,50.00
+1004,2026-01-04,David,Chicago,South,Cash,-50,50.00
+1005,2026-01-05,Eve,Houston,West,PayPal,5,50.00
+1006,2026-01-06,Frank,Phoenix,West,PayPal,6,50.00
+1007,2026-01-07,Grace,Philadelphia,North,Credit Card,7,50.00
+1008,2026-01-08,Heidi,Dallas,South,Cash,8,50.00
+1009,2026-02-30,Ivan,Austin,South,Cash,9,50.00
+1010,2026-01-10,Judy,Seattle,West,PayPal,10,50.00
+"""
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write(csv_content)
+
+        result = self.agent.process(csv_path)
+        flagged = result["data_quality_report"]["flagged_for_review"]
+        flagged_row_indices = [item["row_index"] for item in flagged]
+
+        # Verify exact row numbers match what a user sees in Excel/Sheets
+        self.assertIn(5, flagged_row_indices, f"Row 5 should be flagged, got {flagged_row_indices}")
+        self.assertIn(10, flagged_row_indices, f"Row 10 should be flagged, got {flagged_row_indices}")
+
+        # Ensure raw 0-based array indices (3 and 8) are NOT displayed/used
+        self.assertNotIn(3, flagged_row_indices, "Raw array index 3 was used instead of file row 5")
+        self.assertNotIn(8, flagged_row_indices, "Raw array index 8 was used instead of file row 10")
+
+        # Verify preview records carry the correct file row numbers
+        preview = result["cleaned_preview"]
+        self.assertEqual(preview[0]["_file_row_number"], 2)  # 1st data row is file row 2
+        self.assertEqual(preview[3]["_file_row_number"], 5)  # 4th data row is file row 5
+        self.assertEqual(preview[8]["_file_row_number"], 10) # 9th data row is file row 10
+
 
 if __name__ == "__main__":
     unittest.main()

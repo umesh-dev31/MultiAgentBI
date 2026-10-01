@@ -56,8 +56,8 @@ export const CleanedDataPreview: React.FC<CleanedDataPreviewProps> = ({
                 key={rowIndex}
                 className="hover:bg-slate-50 transition-colors"
               >
-                <td className="py-2.5 px-4 text-center font-mono text-slate-400 text-xs bg-slate-50/50">
-                  {rowIndex + 1}
+                <td className="py-2.5 px-4 text-center font-mono text-slate-400 text-xs bg-slate-50/50" title="Original file row number">
+                  {row._file_row_number ?? rowIndex + 2}
                 </td>
                 {columnNames.map((col) => {
                   const val = row[col]

@@ -59,8 +59,8 @@ class SQLAgent:
                 reason = str(item.get("reason", "")).lower()
                 if "outlier" in reason:
                     r_idx = item.get("row_index")
-                    if isinstance(r_idx, int) and (r_idx - 1) in data.index:
-                        excluded_indices.add(r_idx - 1)
+                    if isinstance(r_idx, int) and (r_idx - 2) in data.index:
+                        excluded_indices.add(r_idx - 2)
 
         # 2. Aggregated metric columns
         aggregated_metric_cols = [

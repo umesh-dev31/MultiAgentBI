@@ -14,7 +14,10 @@ export interface DataSummary {
   total_missing_values_filled: number
 }
 
-export type CleanedRecord = Record<string, string | number | boolean | null>
+export type CleanedRecord = Record<string, string | number | boolean | null> & {
+  /** Original 1-based spreadsheet row number (header = row 1, first data row = row 2). */
+  _file_row_number?: number
+}
 
 export interface AutoFixedReport {
   whitespace_trimmed: number

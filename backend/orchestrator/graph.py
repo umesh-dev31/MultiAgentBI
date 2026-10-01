@@ -234,8 +234,8 @@ class Orchestrator:
             for item in quality_report["flagged_for_review"]:
                 if "outlier" in str(item.get("reason", "")).lower():
                     r_idx = item.get("row_index")
-                    if isinstance(r_idx, int) and (r_idx - 1) in data.index:
-                        excluded_indices.add(r_idx - 1)
+                    if isinstance(r_idx, int) and (r_idx - 2) in data.index:
+                        excluded_indices.add(r_idx - 2)
 
         metric_cols = [
             c for c in numeric_cols

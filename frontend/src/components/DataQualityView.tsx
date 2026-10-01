@@ -956,8 +956,8 @@ export const DataQualityView: React.FC<DataQualityViewProps> = ({
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-surface-hover)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <td style={{ padding: '7px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
-                      {rIdx + 1}
+                    <td style={{ padding: '7px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }} title="Original file row number">
+                      {row._file_row_number ?? rIdx + 2}
                     </td>
                     {columns.map((col) => {
                       const val = row[col.name]

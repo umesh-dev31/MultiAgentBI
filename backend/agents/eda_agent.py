@@ -79,9 +79,9 @@ class EDAAgent:
                 reason = str(item.get("reason", "")).lower()
                 if "outlier" in reason:
                     r_idx = item.get("row_index")
-                    # row_index is 1-indexed
-                    if isinstance(r_idx, int) and (r_idx - 1) in data.index:
-                        excluded_indices.add(r_idx - 1)
+                    # row_index is original file row number (1-based + 1 header) -> subtract 2 for 0-based data index
+                    if isinstance(r_idx, int) and (r_idx - 2) in data.index:
+                        excluded_indices.add(r_idx - 2)
 
         # Columns that represent quantities, prices, and amounts being aggregated
         aggregated_metric_cols = [

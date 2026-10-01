@@ -37,8 +37,8 @@ class MLAgent:
                 reason = str(item.get("reason", "")).lower()
                 if "outlier" in reason:
                     r_idx = item.get("row_index")
-                    if isinstance(r_idx, int) and (r_idx - 1) in data.index:
-                        excluded_indices.add(r_idx - 1)
+                    if isinstance(r_idx, int) and (r_idx - 2) in data.index:
+                        excluded_indices.add(r_idx - 2)
 
         # 2. Aggregated metric columns
         aggregated_metric_cols = [
@@ -300,8 +300,9 @@ class MLAgent:
                 else:
                     record_dict[col] = str(v)
 
+            display_row = int(data.index[idx]) + 2 if hasattr(data, "index") and isinstance(data.index[idx], (int, np.integer)) else int(idx) + 2
             anomalies_list.append({
-                "row_index": int(idx + 1),
+                "row_index": display_row,
                 "anomaly_score": normalized_score,
                 "severity": "High" if normalized_score >= 70 else "Medium",
                 "reason": " & ".join(reasons),

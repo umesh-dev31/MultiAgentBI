@@ -110,7 +110,7 @@ class TestEDAAgent(unittest.TestCase):
         })
         mock_quality_report = {
             "flagged_for_review": [
-                {"row_index": 4, "column": "quantity", "reason": "possible outlier, review before including in analysis"}
+                {"row_index": 5, "column": "quantity", "reason": "possible outlier, review before including in analysis"}
             ]
         }
         res = self.agent.analyze(dirty_df, quality_report=mock_quality_report)

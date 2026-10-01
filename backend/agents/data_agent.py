@@ -311,7 +311,7 @@ class DataAgent:
                             raw_display = str(raw_val) if pd.notna(raw_val) else str(val)
                             flagged_for_review.append(
                                 {
-                                    "row_index": idx + 1,
+                                    "row_index": raw_idx + 2,
                                     "column": col_str,
                                     "original_value": raw_display,
                                     "reason": f"Unparseable or impossible calendar date '{raw_display}'",
@@ -337,7 +337,7 @@ class DataAgent:
                             raw_display = str(raw_val) if pd.notna(raw_val) else str(val)
                             flagged_for_review.append(
                                 {
-                                    "row_index": idx + 1,
+                                    "row_index": raw_idx + 2,
                                     "column": col_str,
                                     "original_value": raw_display,
                                     "reason": f"Non-numeric text '{raw_display}' in numeric column",
@@ -363,7 +363,7 @@ class DataAgent:
 
                                 flagged_for_review.append(
                                     {
-                                        "row_index": idx + 1,
+                                        "row_index": raw_idx + 2,
                                         "column": col_str,
                                         "original_value": raw_display,
                                         "reason": reason_str,
@@ -386,7 +386,7 @@ class DataAgent:
                     if pd.notna(num_val) and num_val < 0:
                         flagged_for_review.append(
                             {
-                                "row_index": int(idx) + 1,
+                                "row_index": raw_idx + 2,
                                 "column": col_str,
                                 "original_value": raw_val,
                                 "reason": f"Negative value ({raw_val}) in column that should be non-negative",
@@ -396,7 +396,7 @@ class DataAgent:
                         # A valid order cannot have 0 quantity or 0 unit_price
                         flagged_for_review.append(
                             {
-                                "row_index": int(idx) + 1,
+                                "row_index": raw_idx + 2,
                                 "column": col_str,
                                 "original_value": raw_val,
                                 "reason": f"Zero value in '{col_str}' — business-invalid (a valid order requires quantity > 0 and unit_price > 0)",
@@ -420,7 +420,7 @@ class DataAgent:
                                 raw_val = raw_df.at[raw_idx, col]
                                 flagged_for_review.append(
                                     {
-                                        "row_index": int(idx) + 1,
+                                        "row_index": raw_idx + 2,
                                         "column": col_str,
                                         "original_value": raw_val,
                                         "reason": "possible outlier, review before including in analysis",
@@ -508,6 +508,7 @@ class DataAgent:
                     confidence_tag = None
                     if price_col_name and cat_price_medians:
                         row_price = pd.to_numeric(df.at[idx, price_col_name], errors="coerce")
+                        raw_idx = int(df.at[idx, "_raw_row_idx"])
                         if pd.notna(row_price) and row_price > 0:
                             # Pick the category whose median price is closest
                             closest_cat = min(
@@ -518,7 +519,7 @@ class DataAgent:
                             confidence_tag = "high"
                             flagged_for_review.append(
                                 {
-                                    "row_index": int(idx) + 1,
+                                    "row_index": raw_idx + 2,
                                     "column": cat_col_name,
                                     "original_value": None,
                                     "reason": (
@@ -535,7 +536,7 @@ class DataAgent:
                             confidence_tag = "low"
                             flagged_for_review.append(
                                 {
-                                    "row_index": int(idx) + 1,
+                                    "row_index": raw_idx + 2,
                                     "column": cat_col_name,
                                     "original_value": None,
                                     "reason": (
@@ -657,9 +658,10 @@ class DataAgent:
                             )
 
                         df.at[idx, col] = fill_val
+                        raw_idx = int(df.at[idx, "_raw_row_idx"])
                         flagged_for_review.append(
                             {
-                                "row_index": int(idx) + 1,
+                                "row_index": raw_idx + 2,
                                 "column": col_str,
                                 "original_value": None,
                                 "reason": (
@@ -721,9 +723,15 @@ class DataAgent:
                 }
             )
 
+        # Capture raw row indices for preview records before dropping the tracking column
+        preview_raw_indices = (
+            df["_raw_row_idx"].head(10).tolist()
+            if "_raw_row_idx" in df.columns
+            else list(range(min(10, len(df))))
+        )
+
         if "_raw_row_idx" in df.columns:
             df.drop(columns=["_raw_row_idx"], inplace=True)
-
 
         cleaned_rows = int(len(df))
         cleaned_cols = int(len(df.columns))
@@ -735,9 +743,11 @@ class DataAgent:
         cleaned_preview = preview_df.to_dict(orient="records")
 
         clean_preview_records: List[Dict[str, Any]] = []
-        for row in cleaned_preview:
+        for i, row in enumerate(cleaned_preview):
             cleaned_row = {}
             for k, v in row.items():
+                if k == "_raw_row_idx":
+                    continue
                 if pd.isna(v):
                     cleaned_row[str(k)] = None
                 elif isinstance(v, (np.integer,)):
@@ -750,6 +760,8 @@ class DataAgent:
                     cleaned_row[str(k)] = v.isoformat()
                 else:
                     cleaned_row[str(k)] = v
+            orig_row_num = int(preview_raw_indices[i]) + 2 if i < len(preview_raw_indices) else i + 2
+            cleaned_row["_file_row_number"] = orig_row_num
             clean_preview_records.append(cleaned_row)
 
         # Cache cleaned dataframe for session/EDA consumption
