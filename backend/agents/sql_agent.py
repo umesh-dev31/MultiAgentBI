@@ -3,6 +3,7 @@ import re
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
+from agents.validation import validated_subset
 from dotenv import load_dotenv
 
 # Load environment variables from .env
@@ -32,73 +33,8 @@ class SQLAgent:
         self.groq_model = groq_model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
         self.anthropic_model = anthropic_model or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 
-    def _filter_validated_subset(
-        self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None
-    ) -> pd.DataFrame:
-        """Filters the DataFrame down to the validated subset using identical business rules
-        to the EDA Agent (excludes negative quantities/prices, outliers > 3x IQR, and unparseable nulls).
-        """
-        if df is None or df.empty:
-            return pd.DataFrame()
-
-        data = df.copy().reset_index(drop=True)
-        numeric_cols: List[str] = []
-
-        for col in data.columns:
-            num_series = pd.to_numeric(data[col], errors="coerce")
-            valid_ratio = num_series.notna().sum() / len(data) if len(data) > 0 else 0
-            if valid_ratio > 0.6:
-                numeric_cols.append(col)
-                data[col] = num_series
-
-        excluded_indices = set()
-
-        # 1. Flagged outliers from DataQualityReport
-        if quality_report and "flagged_for_review" in quality_report:
-            for item in quality_report["flagged_for_review"]:
-                reason = str(item.get("reason", "")).lower()
-                if "outlier" in reason:
-                    r_idx = item.get("row_index")
-                    if isinstance(r_idx, int) and (r_idx - 2) in data.index:
-                        excluded_indices.add(r_idx - 2)
-
-        # 2. Aggregated metric columns
-        aggregated_metric_cols = [
-            c for c in numeric_cols
-            if any(kw in c.lower() for kw in ["qty", "quantity", "price", "unit_price", "amount", "revenue", "sales", "total", "cost", "fee"])
-        ]
-        if not aggregated_metric_cols:
-            aggregated_metric_cols = [c for c in numeric_cols if not c.lower().endswith("_id")]
-
-        # 3. Exclude negative values in non-negative metrics
-        for col in aggregated_metric_cols:
-            neg_mask = data[col] < 0
-            for idx in data[neg_mask].index:
-                excluded_indices.add(idx)
-
-        # 4. Exclude extreme statistical outliers (> 3x IQR from median)
-        for col in aggregated_metric_cols:
-            clean_s = data[col].dropna()
-            if len(clean_s) >= 4:
-                q25 = clean_s.quantile(0.25)
-                q75 = clean_s.quantile(0.75)
-                iqr = q75 - q25
-                med = clean_s.median()
-                if iqr > 0:
-                    lower_lim = med - 3.0 * iqr
-                    upper_lim = med + 3.0 * iqr
-                    outlier_mask = (clean_s < lower_lim) | (clean_s > upper_lim)
-                    for idx in clean_s[outlier_mask].index:
-                        excluded_indices.add(idx)
-
-        # 5. Exclude null values in aggregated metric columns
-        for col in aggregated_metric_cols:
-            null_mask = data[col].isna()
-            for idx in data[null_mask].index:
-                excluded_indices.add(idx)
-
-        validated_mask = ~data.index.isin(excluded_indices)
-        return data[validated_mask].copy().reset_index(drop=True)
+    def _filter_validated_subset(self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+        return validated_subset(df, quality_report)
 
     def _extract_schema(self, df: pd.DataFrame) -> str:
         """Extracts table schema with column names, data types, and sample distinct values."""
@@ -245,6 +181,27 @@ class SQLAgent:
             return "SELECT * FROM orders LIMIT 10"
         if any(kw in q for kw in ["total number of records", "total number of rows", "total count", "how many rows", "how many records", "count of records", "row count"]):
             return "SELECT COUNT(*) AS total_records FROM orders"
+        def quote(name):
+            return '"' + str(name).replace('"', '""') + '"'
+        columns = {str(c).lower(): c for c in df.columns}
+        revenue = next((columns[c] for c in ["revenue", "sales", "amount", "total"] if c in columns), None)
+        qty = next((columns[c] for c in ["quantity", "qty"] if c in columns), None)
+        price = next((columns[c] for c in ["unit_price", "price"] if c in columns), None)
+        revenue_expr = quote(revenue) if revenue else (f"{quote(qty)} * {quote(price)}" if qty and price else None)
+        group_match = re.search(r"\b(?:by|per|each)\s+(?:the\s+)?([a-z_]+)", q)
+        group = None
+        if group_match:
+            word = group_match.group(1)
+            group = columns.get(word) or columns.get(word.rstrip('s'))
+        simple_total = re.fullmatch(r"(?:what (?:is|are) (?:the )?|show (?:me )?)?(?:total |sum of )?(?:revenue|sales|amount) (?:by|per|for each) (?:the )?[a-z_]+", q.strip(" ?.!"))
+        if group and revenue_expr and simple_total:
+            return f"SELECT {quote(group)}, SUM({revenue_expr}) AS total_revenue FROM orders GROUP BY {quote(group)} ORDER BY total_revenue DESC"
+        customer = next((columns[c] for c in ["customer", "customer_name"] if c in columns), None)
+        top_match = re.search(r"\btop\s+(\d+)\s+customers?", q)
+        simple_top = re.fullmatch(r"(?:show (?:me )?)?top \d+ customers? by (?:order count|number of orders)", q.strip(" ?.!"))
+        if customer and top_match and simple_top:
+            limit = min(int(top_match.group(1)), 1000)
+            return f"SELECT {quote(customer)}, COUNT(*) AS order_count FROM orders GROUP BY {quote(customer)} ORDER BY order_count DESC LIMIT {limit}"
         return None
 
     def _execute_sql(
@@ -252,6 +209,7 @@ class SQLAgent:
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Executes the query on the SQLite connection and returns records and error."""
         try:
+            conn.execute("PRAGMA query_only = ON")
             cursor = conn.cursor()
             cursor.execute(sql)
             columns = [desc[0] for desc in cursor.description] if cursor.description else []

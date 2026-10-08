@@ -4,7 +4,13 @@ import sys
 import time
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 import pandas as pd
+from agents.validation import validated_subset
 from langgraph.graph import StateGraph, START, END
+
+# Windows consoles may default to cp1252; telemetry must not abort a run.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8', errors='replace')
 
 # Import existing agents (zero logic changes)
 from agents.data_agent import DataAgent
@@ -140,7 +146,7 @@ class Orchestrator:
             quality_report = result.get("data_quality_report")
             elapsed = time.time() - t0
 
-            rows_in = result.get("summary", {}).get("total_rows", "N/A")
+            rows_in = result.get("summary", {}).get("original_rows", "N/A")
             rows_out = result.get("summary", {}).get("cleaned_rows", "N/A")
             flagged = len(quality_report.get("flagged_for_review", [])) if quality_report else 0
             details = f"Cleaned {rows_in} rows -> {rows_out} rows. {flagged} items flagged for review."
@@ -225,46 +231,7 @@ class Orchestrator:
                 "execution_logs": self._create_log("Validation Gate", elapsed, "failed", err_msg),
             }
 
-        # Construct validated subset using unified filtering rules (matching EDAAgent)
-        data = cleaned_df.copy().reset_index(drop=True)
-        numeric_cols = [c for c in data.columns if pd.to_numeric(data[c], errors="coerce").notna().sum() / len(data) > 0.6]
-
-        excluded_indices = set()
-        if quality_report and "flagged_for_review" in quality_report:
-            for item in quality_report["flagged_for_review"]:
-                if "outlier" in str(item.get("reason", "")).lower():
-                    r_idx = item.get("row_index")
-                    if isinstance(r_idx, int) and (r_idx - 2) in data.index:
-                        excluded_indices.add(r_idx - 2)
-
-        metric_cols = [
-            c for c in numeric_cols
-            if any(k in str(c).lower() for k in ["qty", "quantity", "price", "unit_price", "amount", "revenue", "sales", "total"])
-        ]
-        if not metric_cols:
-            metric_cols = [c for c in numeric_cols if not str(c).lower().endswith("_id")]
-
-        for c in metric_cols:
-            neg_mask = data[c] < 0
-            for idx in data[neg_mask].index:
-                excluded_indices.add(idx)
-
-            clean_s = data[c].dropna()
-            if len(clean_s) >= 4:
-                q25 = float(clean_s.quantile(0.25))
-                q75 = float(clean_s.quantile(0.75))
-                iqr = q75 - q25
-                med = float(clean_s.median())
-                if iqr > 0:
-                    outlier_mask = (clean_s < med - 3.0 * iqr) | (clean_s > med + 3.0 * iqr)
-                    for idx in clean_s[outlier_mask].index:
-                        excluded_indices.add(idx)
-
-            null_mask = data[c].isna()
-            for idx in data[null_mask].index:
-                excluded_indices.add(idx)
-
-        validated_df = data[~data.index.isin(excluded_indices)].copy().reset_index(drop=True)
+        validated_df = validated_subset(cleaned_df, quality_report)
 
         if len(validated_df) == 0:
             elapsed = time.time() - t0
@@ -283,7 +250,7 @@ class Orchestrator:
             }
 
         elapsed = time.time() - t0
-        details = f"Validation passed! Validated subset: {len(validated_df)} rows ({len(excluded_indices)} excluded)."
+        details = f"Validation passed! Validated subset: {len(validated_df)} rows ({len(cleaned_df) - len(validated_df)} excluded)."
         print(f"\033[92m[LangGraph Orchestrator] ✓ {details} in {elapsed:.2f}s\033[0m")
 
         self._notify(
@@ -563,8 +530,7 @@ class Orchestrator:
         builder.add_edge("error_node", END)
 
         # Parallel fan-out join: eda_node and ml_node both feed into visualization_node
-        builder.add_edge("eda_node", "visualization_node")
-        builder.add_edge("ml_node", "visualization_node")
+        builder.add_edge(["eda_node", "ml_node"], "visualization_node")
 
         # visualization_node -> insight_node -> END
         builder.add_edge("visualization_node", "insight_node")
@@ -628,7 +594,11 @@ class Orchestrator:
                 session = SessionLocal()
                 try:
                     fname = os.path.basename(file_path) if file_path else "dataset.csv"
-                    summary_obj = final_state.get("dataset_summary") or {}
+                    summary_obj = dict(final_state.get("dataset_summary") or {})
+                    for name in ["cleaned", "validated"]:
+                        frame = final_state.get(name + "_df")
+                        if frame is not None:
+                            summary_obj[name + "_source_rows"] = frame.attrs.get("source_rows", [])
                     inner_sum = summary_obj.get("summary") or {}
                     total_rows = inner_sum.get("original_rows") or inner_sum.get("total_rows") or 0
                     if not total_rows and final_state.get("cleaned_df") is not None:

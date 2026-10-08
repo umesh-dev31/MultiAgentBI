@@ -730,6 +730,7 @@ class DataAgent:
             else list(range(min(10, len(df))))
         )
 
+        df.attrs["source_rows"] = [int(i) + 2 for i in df["_raw_row_idx"]]
         if "_raw_row_idx" in df.columns:
             df.drop(columns=["_raw_row_idx"], inplace=True)
 

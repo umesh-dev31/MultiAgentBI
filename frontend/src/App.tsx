@@ -44,6 +44,7 @@ function App() {
     return 'upload'
   })
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
+  const [exporting, setExporting] = useState(false)
   const [uploading, setUploading] = useState<boolean>(false)
   const [edaLoading, setEdaLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
@@ -130,7 +131,7 @@ function App() {
       const data: PipelineRunResponse = await response.json()
 
       setBackendOnline(true)
-      if (data.dataset_id) setCurrentDatasetId(data.dataset_id)
+      setCurrentDatasetId(data.dataset_id ?? null)
       setPipelineLogs(data.execution_logs || [])
       setDatasetResult(data.dataset_summary)
       setEdaResult(data.eda_result)
@@ -207,6 +208,31 @@ function App() {
     }
   }
 
+  const handleExport = async (format: 'csv' | 'json' | 'html') => {
+    if (!currentDatasetId) {
+      setError('This dataset was not saved. Please upload it again before exporting.')
+      return
+    }
+    setExporting(true)
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/export/${currentDatasetId}?format=${format}`)
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        throw new Error(body.detail || 'Export failed. Please try again.')
+      }
+      const url = URL.createObjectURL(await response.blob())
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `agentinsight-${currentDatasetId}.${format}`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Export failed.')
+    } finally { setExporting(false) }
+  }
+
   const handleReset = () => {
     setDatasetResult(null)
     setEdaResult(null)
@@ -240,6 +266,8 @@ function App() {
   // ── Dashboard ─────────────────────────────────────────────────────────────
   return (
     <DashboardLayout
+      onExport={handleExport}
+      exporting={exporting}
       activeTab={activeTab}
       onTabChange={setActiveTab}
       hasData={hasData}

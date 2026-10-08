@@ -4,11 +4,12 @@ import os
 import shutil
 import tempfile
 import uuid
+import html
 from typing import Any, Dict, Optional
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -214,7 +215,8 @@ def run_full_pipeline(
         )
 
     temp_dir = tempfile.mkdtemp(prefix="agentinsight_pipeline_")
-    temp_file_path = os.path.join(temp_dir, file.filename)
+    safe_filename = os.path.basename(file.filename.replace("\\", "/"))
+    temp_file_path = os.path.join(temp_dir, safe_filename)
 
     actual_id = run_id or session_id
 
@@ -284,7 +286,7 @@ def run_full_pipeline(
             shutil.copyfileobj(file.file, buffer)
 
         # Execute the LangGraph pipeline with live event callback
-        state = orchestrator.run_pipeline(temp_file_path, event_callback=event_callback)
+        state = Orchestrator(knowledge_agent=knowledge_agent).run_pipeline(temp_file_path, event_callback=event_callback)
 
         if state.get("errors"):
             err_msg = "; ".join(state["errors"])
@@ -424,6 +426,8 @@ def get_historical_pipeline_run(dataset_id: int):
         # Reconstruct FULL validated_df and cleaned_df from persistent storage
         if getattr(run, "validated_data", None):
             current_validated_df = pd.DataFrame(run.validated_data)
+            current_validated_df.attrs["validated"] = True
+            current_validated_df.attrs["source_rows"] = (run.dataset_summary or {}).get("validated_source_rows", list(range(2, len(current_validated_df) + 2)))
         elif getattr(run, "cleaned_data", None):
             current_validated_df = pd.DataFrame(run.cleaned_data)
         else:
@@ -479,6 +483,8 @@ def _ensure_active_dataset(dataset_id: Optional[int] = None) -> Optional[pd.Data
                 current_suggested_questions = run.suggested_questions
                 if getattr(run, "validated_data", None):
                     current_validated_df = pd.DataFrame(run.validated_data)
+                    current_validated_df.attrs["validated"] = True
+                    current_validated_df.attrs["source_rows"] = (run.dataset_summary or {}).get("validated_source_rows", list(range(2, len(current_validated_df) + 2)))
                 elif getattr(run, "cleaned_data", None):
                     current_validated_df = pd.DataFrame(run.cleaned_data)
                 if getattr(run, "cleaned_data", None):
@@ -486,6 +492,7 @@ def _ensure_active_dataset(dataset_id: Optional[int] = None) -> Optional[pd.Data
                 else:
                     current_cleaned_df = current_validated_df
                 return current_validated_df if current_validated_df is not None else current_cleaned_df
+            raise HTTPException(status_code=404, detail=f"Dataset with ID {dataset_id} not found.")
         finally:
             session.close()
 
@@ -503,6 +510,8 @@ def _ensure_active_dataset(dataset_id: Optional[int] = None) -> Optional[pd.Data
             current_suggested_questions = latest_run.suggested_questions
             if getattr(latest_run, "validated_data", None):
                 current_validated_df = pd.DataFrame(latest_run.validated_data)
+                current_validated_df.attrs["validated"] = True
+                current_validated_df.attrs["source_rows"] = (latest_run.dataset_summary or {}).get("validated_source_rows", list(range(2, len(current_validated_df) + 2)))
             elif getattr(latest_run, "cleaned_data", None):
                 current_validated_df = pd.DataFrame(latest_run.cleaned_data)
             else:
@@ -669,7 +678,8 @@ def upload_dataset(file: UploadFile = File(...)):
 
     # Save to a temporary file safely
     temp_dir = tempfile.mkdtemp(prefix="agentinsight_")
-    temp_file_path = os.path.join(temp_dir, file.filename)
+    safe_filename = os.path.basename(file.filename.replace("\\", "/"))
+    temp_file_path = os.path.join(temp_dir, safe_filename)
 
     try:
         with open(temp_file_path, "wb") as buffer:
@@ -679,7 +689,10 @@ def upload_dataset(file: UploadFile = File(...)):
         result = data_agent.process(temp_file_path)
 
         # Store cleaned DataFrame and quality report in session memory for EDA
-        global current_cleaned_df, current_quality_report, current_suggested_questions
+        global current_cleaned_df, current_quality_report, current_suggested_questions, current_validated_df, current_dataset_id, current_pipeline_result
+        current_validated_df = None
+        current_dataset_id = None
+        current_pipeline_result = None
         current_cleaned_df = data_agent.last_cleaned_df
         current_quality_report = result.get("data_quality_report")
         current_suggested_questions = None  # Reset cached questions for new schema
@@ -700,3 +713,66 @@ def upload_dataset(file: UploadFile = File(...)):
                 shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception:
             pass
+
+
+@app.get("/api/export/{dataset_id}")
+def export_dataset(dataset_id: int, format: str = Query("json", pattern="^(json|csv|html)$")):
+    """Download a saved analysis or full cleaned CSV without changing active session."""
+    session = SessionLocal()
+    try:
+        dataset = session.get(Dataset, dataset_id)
+        run = session.query(PipelineRun).filter(PipelineRun.dataset_id == dataset_id).order_by(PipelineRun.created_at.desc()).first()
+        if dataset is None or run is None:
+            raise HTTPException(status_code=404, detail="Saved dataset not found.")
+        report = {"dataset": dataset.to_dict(), "data_quality_report": run.audit_report,
+                  "eda_result": run.eda_result, "ml_result": run.ml_result,
+                  "visualization_result": run.visualization_result, "insight_result": run.insight_result,
+                  "execution_logs": run.execution_logs}
+        if format == "csv":
+            if run.cleaned_data is None:
+                raise HTTPException(status_code=409, detail="This older run has no complete cleaned dataset. Please upload it again.")
+            data = pd.DataFrame(run.cleaned_data)
+            # Avoid spreadsheet formula execution when exported text is opened in Excel.
+            for col in data.columns:
+                data[col] = data[col].map(lambda value: "'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value)
+            content = '\ufeff' + data.to_csv(index=False)
+            media_type = "text/csv"
+        elif format == "html":
+            title = html.escape(dataset.filename)
+            sections = "".join("<section><h2>" + html.escape(key.replace("_", " ").title()) + "</h2><pre>" + html.escape(json.dumps(value, indent=2, ensure_ascii=False, default=str)) + "</pre></section>" for key, value in report.items())
+            content = '<!doctype html><html><head><meta charset="utf-8"><title>AgentInsight Analysis</title><style>body{font:15px system-ui;max-width:1000px;margin:40px auto;padding:24px;color:#172033}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px monospace}section{border-top:1px solid #ddd;padding:16px 0}button{padding:10px 16px}@media print{button{display:none}}</style></head><body><h1>AgentInsight AI</h1><p>' + title + '</p><button onclick="window.print()">Print / Save as PDF</button>' + sections + '</body></html>'
+            media_type = "text/html"
+        else:
+            content = json.dumps(report, ensure_ascii=False, indent=2, default=str)
+            media_type = "application/json"
+        return Response(content, media_type=media_type,
+                        headers={"Content-Disposition": f'attachment; filename="agentinsight-{dataset_id}.{format}"'})
+    finally:
+        session.close()
+
+
+class DatabaseImportRequest(BaseModel):
+    table: str
+
+@app.get("/api/database/tables")
+def list_source_tables():
+    if not os.getenv("ANALYTICS_DATABASE_URL"):
+        return {"configured": False, "tables": []}
+    from db.source import source_tables
+    try:
+        return {"configured": True, "tables": source_tables()}
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cannot connect to the configured analytics database. Check its URL, driver and permissions.")
+
+@app.post("/api/database/extract")
+def extract_source_table(request: DatabaseImportRequest):
+    from db.source import extract_table
+    try:
+        frame = extract_table(request.table)
+        return Response(frame.to_csv(index=False), media_type="text/csv")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Table not found in the configured analytics database.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Database import failed. Check the source connection and table permissions.")

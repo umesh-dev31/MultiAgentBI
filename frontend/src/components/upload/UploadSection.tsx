@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react'
+import { DatabaseImport } from './DatabaseImport'
 import { PipelineProgress } from './PipelineProgress'
 import { useTheme } from '../../context/ThemeContext'
 import type { PipelineExecutionLog } from '../../types/data'
@@ -79,7 +80,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
                 ? 'border-white/25 bg-white/[0.05] text-white'
                 : 'border-black/20 bg-black/[0.04] text-neutral-900'
             }`}>
-              CSV
+              {activeFileName?.split('.').pop()?.toUpperCase() || 'DATA'}
             </div>
             <div>
               <div className="flex items-center gap-2.5">
@@ -216,6 +217,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
           backendUrl={backendUrl}
         />
       )}
+      <DatabaseImport backendUrl={backendUrl} disabled={disabled || isExecutingPipeline} onFileUpload={onFileUpload} />
     </div>
   )
 }

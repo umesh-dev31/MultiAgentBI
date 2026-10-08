@@ -297,3 +297,26 @@ npm run build
 ## License
 
 MIT License — see the [LICENSE](LICENSE) file for details.
+
+
+## Review fixes and additional inputs / exports
+
+- All analysis agents now use the same idempotent validation function. Zero-value metrics remain included, negative/null metrics and extreme outliers are excluded consistently. Original spreadsheet row numbers survive duplicate removal and history restoration.
+- Forecast fitting uses actual calendar-month distances, including gaps in uploaded history.
+- SQL execution also enables SQLite read-only mode. Simple revenue-by-category and top-customer questions work offline; other natural-language queries still use the configured LLM.
+- A fresh `/api/upload` clears previous pipeline state. Unknown dataset IDs return 404 instead of silently querying a different dataset.
+- The dashboard includes **Export results** for a full cleaned CSV, full analysis JSON, and a printable HTML report (use the browser's Save as PDF option). This uses persisted full records, not the preview.
+- **Import from a database** reads tables from an operator-configured `ANALYTICS_DATABASE_URL` in `backend/.env`. Supported URL schemes: `postgresql+psycopg2://`, `mysql+pymysql://`, and `sqlite:///`. Use a read-only database account. The selected table is passed through the same upload pipeline; imports over 100,000 rows are rejected rather than silently truncated. Database credentials are never sent to the frontend.
+- Dashboard panels adapt to narrow windows; history timestamps stored as UTC display in the browser's local timezone. Landing-page components were not changed.
+
+### Windows startup and verification
+
+A separate `backend/venv-review` environment is preferred by the launch scripts; existing environments are retained. On a new machine with Python 3.12, run `setup_backend.bat`, then `dev.bat`. `backend/run.bat` also works from any working directory and sets UTF-8 console encoding so telemetry cannot break uploads on Windows.
+
+```powershell
+cd backend
+$env:PYTHON_DOTENV_DISABLED = '1'
+.\venv-review\Scripts\python.exe -m pytest tests -q
+```
+
+Tests use temporary databases and disable LLM calls in regression fixtures. SQLite source import is tested; live PostgreSQL/MySQL connections and provider-backed LLM responses require configured services. The PPT's XGBoost, Transformers, Matplotlib/Seaborn references remain proposed alternatives; the current implementation uses IsolationForest, NumPy linear fitting, TF-IDF retrieval, and frontend chart rendering.

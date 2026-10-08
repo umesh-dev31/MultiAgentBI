@@ -42,7 +42,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const formatDate = (isoString?: string) => {
     if (!isoString) return 'Unknown date'
     try {
-      const date = new Date(isoString)
+      const utcString = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(isoString) ? isoString : `${isoString}Z`
+      const date = new Date(utcString)
       return new Intl.DateTimeFormat('en-US', {
         month: 'short',
         day: 'numeric',

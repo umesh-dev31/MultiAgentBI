@@ -256,7 +256,7 @@
 /* ─── Dashboard Shell ─────────────────────────────────────────────────── */
 .dashboard-shell {
   display: grid;
-  grid-template-columns: var(--nav-width) 1fr var(--inspector-width);
+  grid-template-columns: var(--nav-width) minmax(0, 1fr) var(--inspector-width);
   grid-template-rows: var(--topbar-height) 1fr;
   height: 100vh;
   width: 100vw;
@@ -266,13 +266,13 @@
   transition: grid-template-columns 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .dashboard-shell.nav-collapsed {
-  grid-template-columns: var(--nav-collapsed) 1fr var(--inspector-width);
+  grid-template-columns: var(--nav-collapsed) minmax(0, 1fr) var(--inspector-width);
 }
 .dashboard-shell.inspector-closed {
-  grid-template-columns: var(--nav-width) 1fr 0px;
+  grid-template-columns: var(--nav-width) minmax(0, 1fr) 0px;
 }
 .dashboard-shell.nav-collapsed.inspector-closed {
-  grid-template-columns: var(--nav-collapsed) 1fr 0px;
+  grid-template-columns: var(--nav-collapsed) minmax(0, 1fr) 0px;
 }
 
 /* App Logo Theme Rules */
@@ -1038,3 +1038,20 @@
 }
 
 
+
+/* Keep dashboard content usable when the app is viewed in a narrow panel. */
+.dashboard-canvas { min-width: 0; }
+@media (max-width: 1099px) {
+  .dashboard-shell { grid-template-columns: var(--nav-width) minmax(0, 1fr) 0; }
+  .dashboard-shell.nav-collapsed { grid-template-columns: var(--nav-collapsed) minmax(0, 1fr) 0; }
+  .dashboard-shell .dashboard-inspector {
+    position: absolute; right: 0; top: var(--topbar-height); bottom: 0;
+    width: min(var(--inspector-width), calc(100vw - var(--nav-collapsed)));
+    box-shadow: -12px 0 30px rgba(0, 0, 0, 0.25); z-index: 40;
+  }
+}
+@media (max-width: 600px) {
+  .dashboard-topbar .dashboard-breadcrumb { display: none !important; }
+  .dashboard-topbar { justify-content: space-between; padding-right: 8px; }
+  .dashboard-canvas > div { padding: 16px 12px 32px !important; }
+}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { SideNav } from './SideNav'
 import { Logo } from '../Logo'
 import { RightInspector } from './RightInspector'
@@ -14,6 +14,8 @@ interface DashboardLayoutProps {
   hasData: boolean
   onLanding: () => void
   onReset: () => void
+  onExport?: (format: 'csv' | 'json' | 'html') => void
+  exporting?: boolean
   backendOnline: boolean | null
   activeFileName?: string
   datasetResult: UploadResponse | null
@@ -30,6 +32,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   hasData,
   onLanding,
   onReset,
+  onExport,
+  exporting = false,
   backendOnline,
   activeFileName,
   datasetResult,
@@ -38,8 +42,17 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   error,
   onDismissError,
 }) => {
-  const [navCollapsed, setNavCollapsed] = useState(false)
-  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [navCollapsed, setNavCollapsed] = useState(() => window.innerWidth < 900)
+  const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth >= 1100)
+
+  useEffect(() => {
+    const adjustPanels = () => {
+      if (window.innerWidth < 1100) setInspectorOpen(false)
+      if (window.innerWidth < 900) setNavCollapsed(true)
+    }
+    window.addEventListener('resize', adjustPanels)
+    return () => window.removeEventListener('resize', adjustPanels)
+  }, [])
 
   const shellClass = [
     'dashboard-shell',
@@ -133,7 +146,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         </button>
 
         {/* Center: breadcrumb / active tab label */}
-        <div style={{ flex: 1, padding: '0 18px', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <div className="dashboard-breadcrumb" style={{ flex: 1, padding: '0 18px', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Dashboard</span>
             <span style={{ color: 'var(--border-medium)' }}>›</span>
@@ -218,6 +231,16 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         {/* Right: controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <ThemeToggle />
+          {hasData && onExport && (
+            <select aria-label="Download analysis" disabled={exporting || isProcessing}
+              value="" className="btn-ghost" style={{ fontSize: 11, padding: '5px 8px', maxWidth: 150 }}
+              onChange={event => { const format = event.target.value; if (format) onExport(format as 'csv' | 'json' | 'html') }}>
+              <option value="">{exporting ? 'Downloading…' : 'Export results'}</option>
+              <option value="csv">Cleaned CSV</option>
+              <option value="html">Printable report</option>
+              <option value="json">Full analysis JSON</option>
+            </select>
+          )}
 
           {hasData && (
             <button

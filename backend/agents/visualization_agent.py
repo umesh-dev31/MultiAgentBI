@@ -1,6 +1,7 @@
 import re
 from typing import Any, Dict, List, Optional
 import pandas as pd
+from agents.validation import validated_subset
 
 
 class VisualizationAgent:
@@ -8,74 +9,8 @@ class VisualizationAgent:
     to recommend 2-3 highly informative chart specifications for frontend rendering.
     """
 
-    def _get_validated_df(
-        self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None
-    ) -> pd.DataFrame:
-        """Constructs a clean validated subset for metric aggregations,
-        filtering negative quantities/prices, statistical outliers (> 3x IQR), and extreme nulls.
-        """
-        if df is None or df.empty:
-            return pd.DataFrame()
-
-        data = df.copy().reset_index(drop=True)
-        # Drop columns with all NaNs
-        data = data.dropna(how="all", axis=1)
-
-        numeric_cols: List[str] = []
-        for col in data.columns:
-            num_s = pd.to_numeric(data[col], errors="coerce")
-            if len(data) > 0 and (num_s.notna().sum() / len(data)) > 0.6:
-                numeric_cols.append(col)
-                data[col] = num_s
-
-        excluded_indices = set()
-
-        # 1. Outliers from DataQualityReport
-        if quality_report and "flagged_for_review" in quality_report:
-            for item in quality_report["flagged_for_review"]:
-                reason = str(item.get("reason", "")).lower()
-                if "outlier" in reason:
-                    r_idx = item.get("row_index")
-                    if isinstance(r_idx, int) and (r_idx - 2) in data.index:
-                        excluded_indices.add(r_idx - 2)
-
-        # 2. Aggregated metric columns
-        metric_cols = [
-            c for c in numeric_cols
-            if any(k in str(c).lower() for k in ["qty", "quantity", "price", "unit_price", "amount", "revenue", "sales", "total"])
-        ]
-        if not metric_cols:
-            metric_cols = [c for c in numeric_cols if not str(c).lower().endswith("_id")]
-
-        # Filter negative and zero values
-        for c in metric_cols:
-            invalid_mask = data[c] <= 0
-            for idx in data[invalid_mask].index:
-                excluded_indices.add(idx)
-
-        # 3. Detect extreme statistical outliers (> 3x IQR from median)
-        for col in metric_cols:
-            clean_s = data[col].dropna()
-            if len(clean_s) >= 4:
-                q25 = float(clean_s.quantile(0.25))
-                q75 = float(clean_s.quantile(0.75))
-                iqr = q75 - q25
-                med = float(clean_s.median())
-                if iqr > 0:
-                    lower_lim = med - 3.0 * iqr
-                    upper_lim = med + 3.0 * iqr
-                    outlier_mask = (clean_s < lower_lim) | (clean_s > upper_lim)
-                    for idx in clean_s[outlier_mask].index:
-                        excluded_indices.add(idx)
-
-        # 4. Exclude null values in aggregated columns
-        for col in metric_cols:
-            null_mask = data[col].isna()
-            for idx in data[null_mask].index:
-                excluded_indices.add(idx)
-
-        validated_mask = ~data.index.isin(excluded_indices)
-        return data[validated_mask].copy().reset_index(drop=True)
+    def _get_validated_df(self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+        return validated_subset(df, quality_report)
 
     def suggest_charts(
         self,

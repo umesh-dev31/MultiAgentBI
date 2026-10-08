@@ -7,7 +7,11 @@ pandas
 numpy
 python-dotenv
 openpyxl
+xlrd
 anthropic
 groq
 scikit-learn
 sqlalchemy
+
+psycopg2-binary
+pymysql

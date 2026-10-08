@@ -2,6 +2,7 @@ import re
 from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
+from agents.validation import validated_subset
 
 
 class EDAAgent:
@@ -64,64 +65,7 @@ class EDAAgent:
             else:
                 categorical_cols.append(col_str)
 
-        # =====================================================================
-        # VALIDATED SUBSET FILTERING
-        # Exclude rows where:
-        # - quantity or unit_price is negative (business-invalid)
-        # - flagged as statistical outliers in quality report (or exceeding 3x IQR)
-        # - null values in the columns being aggregated
-        # =====================================================================
-        excluded_indices = set()
-
-        # 1. Outliers from DataQualityReport
-        if quality_report and "flagged_for_review" in quality_report:
-            for item in quality_report["flagged_for_review"]:
-                reason = str(item.get("reason", "")).lower()
-                if "outlier" in reason:
-                    r_idx = item.get("row_index")
-                    # row_index is original file row number (1-based + 1 header) -> subtract 2 for 0-based data index
-                    if isinstance(r_idx, int) and (r_idx - 2) in data.index:
-                        excluded_indices.add(r_idx - 2)
-
-        # Columns that represent quantities, prices, and amounts being aggregated
-        aggregated_metric_cols = [
-            c for c in numeric_cols
-            if any(kw in c.lower() for kw in ["qty", "quantity", "price", "unit_price", "amount", "revenue", "sales", "total", "cost", "fee"])
-        ]
-        # Fallback to all numeric columns if no specific metric keywords match
-        if not aggregated_metric_cols:
-            aggregated_metric_cols = [c for c in numeric_cols if not c.lower().endswith("_id")]
-
-        # 2. Exclude negative values in non-negative business columns
-        for col in aggregated_metric_cols:
-            neg_mask = data[col] < 0
-            for idx in data[neg_mask].index:
-                excluded_indices.add(idx)
-
-        # 3. Detect extreme statistical outliers directly (e.g. 3x IQR from median)
-        for col in aggregated_metric_cols:
-            clean_s = data[col].dropna()
-            if len(clean_s) >= 4:
-                q25 = float(clean_s.quantile(0.25))
-                q75 = float(clean_s.quantile(0.75))
-                iqr = q75 - q25
-                med = float(clean_s.median())
-                if iqr > 0:
-                    lower_lim = med - 3.0 * iqr
-                    upper_lim = med + 3.0 * iqr
-                    outlier_mask = (clean_s < lower_lim) | (clean_s > upper_lim)
-                    for idx in clean_s[outlier_mask].index:
-                        excluded_indices.add(idx)
-
-        # 4. Exclude null values in aggregated columns (prevent silent conversion to 0)
-        for col in aggregated_metric_cols:
-            null_mask = data[col].isna()
-            for idx in data[null_mask].index:
-                excluded_indices.add(idx)
-
-        # Construct validated dataset for statistics
-        validated_mask = ~data.index.isin(excluded_indices)
-        validated_df = data[validated_mask].copy()
+        validated_df = validated_subset(data, quality_report)
 
         validated_rows_used = int(len(validated_df))
         excluded_rows_count = total_rows - validated_rows_used

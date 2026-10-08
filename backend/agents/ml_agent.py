@@ -2,6 +2,7 @@ import datetime
 from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
+from agents.validation import validated_subset
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
@@ -12,74 +13,8 @@ class MLAgent:
     2. Trend forecasting (linear regression / moving average) on monthly revenue with honest confidence warnings.
     """
 
-    def _filter_validated_subset(
-        self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None
-    ) -> pd.DataFrame:
-        """Filters DataFrame to validated subset using identical business rules to EDA and SQL agents."""
-        if df is None or df.empty:
-            return pd.DataFrame()
-
-        data = df.copy().reset_index(drop=True)
-        numeric_cols: List[str] = []
-
-        for col in data.columns:
-            num_series = pd.to_numeric(data[col], errors="coerce")
-            valid_ratio = num_series.notna().sum() / len(data) if len(data) > 0 else 0
-            if valid_ratio > 0.6:
-                numeric_cols.append(col)
-                data[col] = num_series
-
-        excluded_indices = set()
-
-        # 1. Flagged outliers from DataQualityReport
-        if quality_report and "flagged_for_review" in quality_report:
-            for item in quality_report["flagged_for_review"]:
-                reason = str(item.get("reason", "")).lower()
-                if "outlier" in reason:
-                    r_idx = item.get("row_index")
-                    if isinstance(r_idx, int) and (r_idx - 2) in data.index:
-                        excluded_indices.add(r_idx - 2)
-
-        # 2. Aggregated metric columns
-        aggregated_metric_cols = [
-            c for c in numeric_cols
-            if any(kw in c.lower() for kw in ["qty", "quantity", "price", "unit_price", "amount", "revenue", "sales", "total", "cost", "fee"])
-        ]
-        if not aggregated_metric_cols:
-            aggregated_metric_cols = [c for c in numeric_cols if not c.lower().endswith("_id")]
-
-        # 3. Exclude strictly negative values in non-negative metrics (< 0)
-        # Consistent with DataAgent and EDAAgent business rules
-        for col in aggregated_metric_cols:
-            invalid_mask = data[col] < 0
-            for idx in data[invalid_mask].index:
-                excluded_indices.add(idx)
-
-        # 4. Exclude extreme statistical outliers (> 3x IQR from median)
-        # Only run if quality_report is provided (indicates raw/cleaned df; validated_df has already purged outliers)
-        if quality_report:
-            for col in aggregated_metric_cols:
-                clean_s = data[col].dropna()
-                if len(clean_s) >= 4:
-                    q25 = clean_s.quantile(0.25)
-                    q75 = clean_s.quantile(0.75)
-                    iqr = q75 - q25
-                    med = clean_s.median()
-                    if iqr > 0:
-                        lower_lim = med - 3.0 * iqr
-                        upper_lim = med + 3.0 * iqr
-                        outlier_mask = (clean_s < lower_lim) | (clean_s > upper_lim)
-                        for idx in clean_s[outlier_mask].index:
-                            excluded_indices.add(idx)
-
-        # 5. Exclude null values in aggregated metric columns
-        for col in aggregated_metric_cols:
-            null_mask = data[col].isna()
-            for idx in data[null_mask].index:
-                excluded_indices.add(idx)
-
-        validated_mask = ~data.index.isin(excluded_indices)
-        return data[validated_mask].copy().reset_index(drop=True)
+    def _filter_validated_subset(self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+        return validated_subset(df, quality_report)
 
     def detect_anomalies(
         self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None
@@ -300,7 +235,8 @@ class MLAgent:
                 else:
                     record_dict[col] = str(v)
 
-            display_row = int(data.index[idx]) + 2 if hasattr(data, "index") and isinstance(data.index[idx], (int, np.integer)) else int(idx) + 2
+            source_rows = data.attrs.get("source_rows", [])
+            display_row = int(source_rows[idx]) if idx < len(source_rows) else int(idx) + 2
             anomalies_list.append({
                 "row_index": display_row,
                 "anomaly_score": normalized_score,
@@ -430,7 +366,8 @@ class MLAgent:
             }
 
         # 2. Fit Linear Regression model over time index
-        x = np.arange(num_periods, dtype=float)
+        periods = pd.PeriodIndex([h["period"] for h in historical], freq="M")
+        x = np.array([p.ordinal - periods[0].ordinal for p in periods], dtype=float)
         y_rev = np.array([h["revenue"] for h in historical], dtype=float)
         y_orders = np.array([h["orders"] for h in historical], dtype=float)
 
@@ -466,7 +403,7 @@ class MLAgent:
 
         forecast: List[Dict[str, Any]] = []
         for i, f_month in enumerate(future_months):
-            idx = num_periods + i
+            idx = x[-1] + i + 1
             pred_rev = float(m_rev * idx + b_rev)
             # Ensure revenue doesn't predict negative
             pred_rev = max(0.0, round(pred_rev, 2))
