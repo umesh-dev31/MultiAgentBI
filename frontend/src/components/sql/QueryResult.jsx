@@ -52,13 +52,15 @@ export const QueryResult = ({
           </div>
           <div className="flex-1">
             <h4 className="font-bold text-sm text-rose-900">
-              Query Execution Alert
+              {/dataset.*not found|no cleaned dataset/i.test(String(error)) ? 'Dataset Session Unavailable' : 'Query Execution Alert'}
             </h4>
             <p className="text-xs text-rose-700 mt-1 font-medium leading-relaxed">
               {error}
             </p>
             <p className="text-[11px] text-rose-600/80 mt-2">
-              Note: The SQL Agent attempted automatic self-correction retry, but the query could not be resolved against the database schema. Try rephrasing your question or picking one of the suggested examples above.
+              {/dataset.*not found|no cleaned dataset/i.test(String(error))
+                ? 'Upload your file again to restore the dataset session. Changing the question will not recover a missing dataset.'
+                : 'Check the question and the selected dataset, then try again.'}
             </p>
           </div>
         </div>

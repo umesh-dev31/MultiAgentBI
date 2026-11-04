@@ -9,6 +9,7 @@ class TestSQLAgent(unittest.TestCase):
         self.agent = SQLAgent()
         self.df = pd.DataFrame({
             "order_id": [101, 102, 103, 104, 105, 106],
+            "order_date": ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-06"],
             "customer": ["Alice", "Bob", "Alice", "Charlie", "Alice", "BadCustomer"],
             "region": ["North", "North", "South", "West", "North", "North"],
             "product": ["Laptop", "Phone", "Laptop", "Tablet", "Laptop", "Laptop"],
@@ -50,23 +51,44 @@ class TestSQLAgent(unittest.TestCase):
 
     def test_generate_and_run_revenue_by_region(self):
         result = self.agent.generate_and_run("What is the total revenue by region?", self.df)
-        print("Generated SQL:", result["generated_sql"])
-        print("Result:", result["result"])
         self.assertIsNone(result["error"])
         self.assertGreater(result["row_count"], 0)
         self.assertIn("SELECT", result["generated_sql"].upper())
-        # Check that North, South, West are in results
         regions = [r.get("region") for r in result["result"] if "region" in r]
         self.assertIn("North", regions)
 
     def test_generate_and_run_top_customers(self):
         result = self.agent.generate_and_run("Top 2 customers by order count", self.df)
-        print("Top customers result:", result["result"])
         self.assertIsNone(result["error"])
         self.assertLessEqual(result["row_count"], 2)
 
+    def test_generate_and_run_suggested_queries(self):
+        # Query 1: Total quantity by order_date
+        r1 = self.agent.generate_and_run("Total quantity by order_date", self.df)
+        self.assertIsNone(r1["error"])
+        self.assertGreater(r1["row_count"], 0)
+        self.assertIn("quantity", r1["generated_sql"].lower())
+        self.assertIn("order_date", r1["generated_sql"].lower())
+
+        # Query 2: Highest quantity recorded by order_date
+        r2 = self.agent.generate_and_run("Highest quantity recorded by order_date", self.df)
+        self.assertIsNone(r2["error"])
+        self.assertGreater(r2["row_count"], 0)
+        self.assertIn("MAX", r2["generated_sql"].upper())
+
+        # Query 3: Average quantity grouped by customer
+        r3 = self.agent.generate_and_run("Average quantity grouped by customer", self.df)
+        self.assertIsNone(r3["error"])
+        self.assertGreater(r3["row_count"], 0)
+        self.assertIn("AVG", r3["generated_sql"].upper())
+
+        # Query 4: Top 5 customer ranked by quantity
+        r4 = self.agent.generate_and_run("Top 5 customer ranked by quantity", self.df)
+        self.assertIsNone(r4["error"])
+        self.assertGreater(r4["row_count"], 0)
+        self.assertIn("LIMIT 5", r4["generated_sql"].upper())
+
     def test_retry_mechanism_on_bad_sql(self):
-        # We can test _execute_sql and retry by simulating bad SQL
         records, err = self.agent._execute_sql(sqlite3.connect(":memory:"), "SELECT non_existent_col FROM nonexistent_tbl")
         self.assertIsNotNone(err)
         self.assertEqual(len(records), 0)

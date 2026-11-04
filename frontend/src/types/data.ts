@@ -117,7 +117,16 @@ export interface PipelineExecutionLog {
   details?: any
 }
 
+export interface DatasetContext {
+  records: Record<string, string | number | boolean | null>[]
+  source_rows: number[]
+  quality_report: DataQualityReport | Record<string, unknown>
+  insight_result: Record<string, unknown>
+  filename: string
+}
+
 export interface PipelineRunResponse {
+  dataset_context?: DatasetContext | null
   status: string
   dataset_id?: number
   filename: string

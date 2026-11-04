@@ -188,6 +188,8 @@ function StageIndicator({ stage, label, doneLabel, description, active, done }) 
  *   disabled?: boolean,
  *   suggestedQuestions?: any[] | null,
  *   currentDatasetId?: number | null,
+ *   datasetContext?: import('../../types/data').DatasetContext | null,
+ *   qualityReport?: any,
  * }} props
  */
 export const AskQuestionView = ({
@@ -195,6 +197,8 @@ export const AskQuestionView = ({
   disabled = false,
   suggestedQuestions = null,
   currentDatasetId = null,
+  datasetContext = null,
+  qualityReport = null,
   initialMode = 'sql',
 }) => {
   // Mode switcher
@@ -231,11 +235,12 @@ export const AskQuestionView = ({
     if (!q || !q.trim() || loading || disabled) return
     setLoading(true)
     setQueryError(null)
+    setResultData(null)
     try {
       const response = await fetch(`${backendUrl}/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q.trim(), dataset_id: currentDatasetId }),
+        body: JSON.stringify({ question: q.trim(), dataset_id: currentDatasetId, dataset_context: datasetContext }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.detail || 'Failed to execute query.')
@@ -275,6 +280,7 @@ export const AskQuestionView = ({
           question: q.trim(),
           scope: ragScope,
           dataset_id: currentDatasetId,
+          dataset_context: ragScope === 'current' ? datasetContext : null,
         }),
       })
 
@@ -314,14 +320,48 @@ export const AskQuestionView = ({
     handleRunRAG(exampleText)
   }
 
-  const ragSuggestions = [
-    'Why was row 13 flagged?',
+  const [ragDynamicQuestions, setRagDynamicQuestions] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    const fetchKnowledgeSuggestions = async () => {
+      try {
+        const params = new URLSearchParams()
+        if (ragScope) params.set('scope', ragScope)
+        if (currentDatasetId != null) params.set('dataset_id', String(currentDatasetId))
+        const res = await fetch(`${backendUrl}/api/knowledge/suggested-questions?${params.toString()}`)
+        if (res.ok) {
+          const json = await res.json()
+          if (active && Array.isArray(json.questions) && json.questions.length > 0) {
+            setRagDynamicQuestions(json.questions)
+          }
+        }
+      } catch {}
+    }
+    fetchKnowledgeSuggestions()
+    return () => { active = false }
+  }, [backendUrl, currentDatasetId, ragScope])
+
+  const flaggedList = qualityReport?.flagged_for_review || datasetContext?.quality_report?.flagged_for_review || []
+  const firstFlagged = flaggedList.length > 0 ? flaggedList[0] : null
+  const firstFlaggedRow = firstFlagged ? (firstFlagged.row_index ?? 2) : null
+  const firstFlaggedCol = firstFlagged ? firstFlagged.column : null
+
+  const clientFallbackQuestions = [
+    firstFlaggedRow != null
+      ? `Why was row ${firstFlaggedRow} flagged?`
+      : 'What data quality issues were found in this dataset?',
+    ...(firstFlaggedCol ? [`What issues were found in '${firstFlaggedCol}'?`] : []),
     'What data quality issues were found in this dataset?',
+    ragScope === 'all_history'
+      ? 'Compare flagged issue counts across all uploaded datasets.'
+      : 'What was the executive recommendation for this dataset?',
     'How does this dataset\'s data quality compare to my previous upload?',
-    ...(ragScope === 'all_history'
-      ? ['Compare flagged issue counts across all uploaded datasets.']
-      : ['What was the executive recommendation for this dataset?']),
-  ]
+  ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 4)
+
+  const ragSuggestions = (ragDynamicQuestions && ragDynamicQuestions.length > 0)
+    ? ragDynamicQuestions
+    : clientFallbackQuestions
 
   // Dataset badge color helper
   const getDatasetColor = (dsId) => {
@@ -434,6 +474,8 @@ export const AskQuestionView = ({
             disabled={disabled || loading}
             backendUrl={backendUrl}
             initialQuestions={suggestedQuestions}
+            datasetContext={datasetContext}
+            currentDatasetId={currentDatasetId}
           />
           <QueryResult
             resultData={resultData}
@@ -527,7 +569,7 @@ export const AskQuestionView = ({
               placeholder={
                 ragScope === 'all_history'
                   ? 'Ask across all uploads (e.g. "How does this dataset compare to my previous upload?")...'
-                  : 'Ask about this analysis (e.g. "Why was row 13 flagged?", "What was the executive recommendation?")...'
+                  : `Ask about this analysis (e.g. "${firstFlaggedRow != null ? `Why was row ${firstFlaggedRow} flagged?` : 'What data quality issues were found?'}")...`
               }
               disabled={ragLoading}
               style={{
@@ -560,7 +602,7 @@ export const AskQuestionView = ({
 
           {/* Suggestion chips */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>Demo queries:</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>Suggested queries:</span>
             {ragSuggestions.map((item, idx) => (
               <button
                 key={idx}

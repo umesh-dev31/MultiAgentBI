@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
+import { CleaningSensitivity } from './CleaningSensitivity'
 import { ExecutiveSummary } from './ExecutiveSummary'
 import { SuggestedCharts } from './SuggestedCharts'
 import { DataHealthScoreGauge } from '../DataHealthScoreGauge'
@@ -9,6 +10,8 @@ import { DataHealthScoreGauge } from '../DataHealthScoreGauge'
   *   disabled?: boolean,
   *   hasData?: boolean,
   *   initialData?: any,
+  *   datasetContext?: any,
+  *   currentDatasetId?: number | null,
   *   dataHealthScore?: any
   * }} props
   */
@@ -18,6 +21,8 @@ export const BusinessSummaryView = ({
   hasData = false,
   initialData = null,
   dataHealthScore = undefined,
+  datasetContext = null,
+  currentDatasetId = null,
 }) => {
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState(initialData)
@@ -38,6 +43,8 @@ export const BusinessSummaryView = ({
     try {
       const response = await fetch(`${backendUrl}/api/insights`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: '', dataset_id: currentDatasetId, dataset_context: datasetContext }),
       })
 
       if (!response.ok) {
@@ -52,7 +59,7 @@ export const BusinessSummaryView = ({
     } finally {
       setLoading(false)
     }
-  }, [backendUrl, disabled, hasData])
+  }, [backendUrl, disabled, hasData, datasetContext, currentDatasetId])
 
   return (
     <div className="space-y-6">
@@ -132,6 +139,7 @@ export const BusinessSummaryView = ({
       {/* Results */}
       {!loading && data && (
         <div className="space-y-6">
+          <CleaningSensitivity report={data.sensitivity_report || initialData?.sensitivity_report} />
           {/* 1. Executive Summary & Strategic Callouts */}
           <ExecutiveSummary
             summary={data.summary}

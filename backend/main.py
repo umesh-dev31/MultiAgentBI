@@ -467,6 +467,26 @@ def ask_knowledge_agent(request: KnowledgeAskRequest):
             detail=f"Knowledge Agent retrieval failed: {str(exc)}",
         )
 
+@app.get("/api/knowledge/suggested-questions")
+def get_knowledge_suggested_questions(
+    scope: str = "current",
+    dataset_id: Optional[int] = None,
+):
+    """Returns dynamic, schema- and audit-tailored suggested questions for the RAG Knowledge Agent."""
+    target_ds_id = dataset_id or current_dataset_id
+    try:
+        questions = knowledge_agent.get_suggested_questions(
+            current_dataset_id=target_ds_id,
+            scope=scope or "current",
+        )
+        return {"questions": questions}
+    except Exception as exc:
+        return {"questions": [
+            "What data quality issues were found in this dataset?",
+            "What was the executive recommendation for this dataset?",
+            "How does this dataset's data quality compare to my previous upload?",
+        ]}
+
 
 def _ensure_active_dataset(dataset_id: Optional[int] = None) -> Optional[pd.DataFrame]:
     """Ensures current_validated_df and current_cleaned_df are populated in session memory.

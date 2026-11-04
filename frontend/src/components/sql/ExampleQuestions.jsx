@@ -49,6 +49,8 @@ export const ExampleQuestions = ({
   disabled = false,
   backendUrl = 'http://localhost:8000',
   initialQuestions = null,
+  datasetContext = null,
+  currentDatasetId = null,
 }) => {
   const [questions, setQuestions] = useState(
     initialQuestions && initialQuestions.length > 0 ? initialQuestions : []
@@ -67,8 +69,13 @@ export const ExampleQuestions = ({
   const fetchQuestions = useCallback(async (refresh = false) => {
     setLoading(true)
     try {
-      const url = `${backendUrl}/api/suggested-questions${refresh ? '?refresh=true' : ''}`
-      const response = await fetch(url)
+      const params = new URLSearchParams()
+      if (refresh) params.set('refresh', 'true')
+      if (currentDatasetId != null) params.set('dataset_id', String(currentDatasetId))
+      const url = `${backendUrl}/api/suggested-questions${params.size ? `?${params}` : ''}`
+      const response = datasetContext
+        ? await fetch(`${backendUrl}/api/suggested-questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: '', dataset_id: currentDatasetId, dataset_context: datasetContext }) })
+        : await fetch(url)
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
       }
@@ -83,7 +90,7 @@ export const ExampleQuestions = ({
     } finally {
       setLoading(false)
     }
-  }, [backendUrl])
+  }, [backendUrl, datasetContext, currentDatasetId])
 
   useEffect(() => {
     if (!initialQuestions || initialQuestions.length === 0) {
