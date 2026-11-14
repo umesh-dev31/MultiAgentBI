@@ -133,12 +133,28 @@ export interface PipelineRunResponse {
   dataset_summary: UploadResponse
   data_quality_report: DataQualityReport
   data_health_score?: DataHealthScore
-  eda_result: EDAResponse
+  eda_result: EDAResponse | null
   ml_result: any
   visualization_result: any
   insight_result: any
   suggested_questions: any[]
   execution_logs: PipelineExecutionLog[]
+  warnings?: { stage: string; code: string; message: string }[]
+  stage_statuses?: Record<string, JobStage>
+}
+
+export interface JobStage {
+  status: 'started' | 'completed' | 'failed'
+  duration_ms?: number
+}
+
+export interface JobStatus {
+  job_id: string
+  status_url: string
+  state: 'queued' | 'running' | 'completed' | 'completed_with_warnings' | 'failed'
+  stages: Record<string, JobStage>
+  error?: { code: string; message: string } | null
+  result?: PipelineRunResponse
 }
 
 export interface HistoryItem {

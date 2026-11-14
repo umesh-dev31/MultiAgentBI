@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react'
 import { DatabaseImport } from './DatabaseImport'
 import { PipelineProgress } from './PipelineProgress'
 import { useTheme } from '../../context/ThemeContext'
-import type { PipelineExecutionLog } from '../../types/data'
+import type { JobStatus } from '../../types/data'
 
 interface UploadSectionProps {
   onFileUpload: (file: File) => void
@@ -10,8 +10,7 @@ interface UploadSectionProps {
   activeFileName?: string
   onReset?: () => void
   isExecutingPipeline?: boolean
-  pipelineLogs?: PipelineExecutionLog[]
-  runId?: string
+  job?: JobStatus | null
   backendUrl?: string
 }
 
@@ -21,8 +20,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
   activeFileName,
   onReset,
   isExecutingPipeline = false,
-  pipelineLogs,
-  runId,
+  job,
   backendUrl,
 }) => {
   const { theme } = useTheme()
@@ -190,7 +188,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
           ))}
         </div>
 
-        {disabled && (
+        {isExecutingPipeline && (
           <div className={`absolute inset-0 rounded-xl flex items-center justify-center z-10 ${
             isDark ? 'bg-black/85' : 'bg-white/85 backdrop-blur-xs'
           }`}>
@@ -201,20 +199,18 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
                 isDark ? 'border-white' : 'border-neutral-900'
               }`} />
               <span className="text-xs font-semibold font-mono">
-                Executing LangGraph Multi-Agent Pipeline...
+                Processing upload…
               </span>
             </div>
           </div>
         )}
       </div>
 
-      {(isExecutingPipeline || (pipelineLogs && pipelineLogs.length > 0)) && (
+      {(isExecutingPipeline || job) && (
         <PipelineProgress
           isExecuting={isExecutingPipeline}
-          logs={pipelineLogs}
+          job={job}
           fileName={activeFileName}
-          runId={runId}
-          backendUrl={backendUrl}
         />
       )}
       <DatabaseImport backendUrl={backendUrl} disabled={disabled || isExecutingPipeline} onFileUpload={onFileUpload} />

@@ -10,7 +10,6 @@ import { DataHealthScoreGauge } from '../DataHealthScoreGauge'
   *   disabled?: boolean,
   *   hasData?: boolean,
   *   initialData?: any,
-  *   datasetContext?: any,
   *   currentDatasetId?: number | null,
   *   dataHealthScore?: any
   * }} props
@@ -21,7 +20,6 @@ export const BusinessSummaryView = ({
   hasData = false,
   initialData = null,
   dataHealthScore = undefined,
-  datasetContext = null,
   currentDatasetId = null,
 }) => {
   const [loading, setLoading] = useState(false)
@@ -35,16 +33,14 @@ export const BusinessSummaryView = ({
   }, [initialData])
 
   const fetchInsights = useCallback(async () => {
-    if (disabled || !hasData) return
+    if (disabled || !hasData || currentDatasetId == null) return
 
     setLoading(true)
     setError(null)
 
     try {
-      const response = await fetch(`${backendUrl}/api/insights`, {
+      const response = await fetch(`${backendUrl}/api/datasets/${currentDatasetId}/analysis/insights`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: '', dataset_id: currentDatasetId, dataset_context: datasetContext }),
       })
 
       if (!response.ok) {
@@ -59,7 +55,7 @@ export const BusinessSummaryView = ({
     } finally {
       setLoading(false)
     }
-  }, [backendUrl, disabled, hasData, datasetContext, currentDatasetId])
+  }, [backendUrl, disabled, hasData, currentDatasetId])
 
   return (
     <div className="space-y-6">
@@ -73,7 +69,7 @@ export const BusinessSummaryView = ({
             </span>
           </h3>
           <p className="text-xs text-slate-600">
-            Autonomous end-to-end intelligence: LLM-grounded managerial briefing with dynamically curated chart specs.
+            Key findings and charts for the selected dataset.
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -85,7 +81,7 @@ export const BusinessSummaryView = ({
           </span>
           <button
             onClick={fetchInsights}
-            disabled={loading || disabled}
+            disabled={loading || disabled || currentDatasetId == null}
             className="px-3 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-2xs transition cursor-pointer disabled:opacity-50"
             title="Refresh business insights"
           >
@@ -107,6 +103,10 @@ export const BusinessSummaryView = ({
           </button>
         </div>
       </div>
+
+      {data?.generation_mode === 'deterministic_fallback' && (
+        <p className="text-sm">This summary was generated from the dataset statistics.</p>
+      )}
 
       {/* Error state */}
       {error && (

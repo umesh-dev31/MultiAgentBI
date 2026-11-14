@@ -49,7 +49,6 @@ export const ExampleQuestions = ({
   disabled = false,
   backendUrl = 'http://localhost:8000',
   initialQuestions = null,
-  datasetContext = null,
   currentDatasetId = null,
 }) => {
   const [questions, setQuestions] = useState(
@@ -67,15 +66,17 @@ export const ExampleQuestions = ({
   }, [initialQuestions])
 
   const fetchQuestions = useCallback(async (refresh = false) => {
+    if (currentDatasetId == null || disabled) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (refresh) params.set('refresh', 'true')
       if (currentDatasetId != null) params.set('dataset_id', String(currentDatasetId))
       const url = `${backendUrl}/api/suggested-questions${params.size ? `?${params}` : ''}`
-      const response = datasetContext
-        ? await fetch(`${backendUrl}/api/suggested-questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: '', dataset_id: currentDatasetId, dataset_context: datasetContext }) })
-        : await fetch(url)
+      const response = await fetch(url)
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
       }
@@ -90,7 +91,7 @@ export const ExampleQuestions = ({
     } finally {
       setLoading(false)
     }
-  }, [backendUrl, datasetContext, currentDatasetId])
+  }, [backendUrl, currentDatasetId, disabled])
 
   useEffect(() => {
     if (!initialQuestions || initialQuestions.length === 0) {

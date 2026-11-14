@@ -84,7 +84,7 @@ export const QueryResult = ({
     return null
   }
 
-  const { question, generated_sql, result, row_count } = resultData
+  const { question, generated_sql, result, row_count, truncated } = resultData
   const columns = result && result.length > 0 ? Object.keys(result[0]) : []
 
   return (
@@ -160,6 +160,7 @@ export const QueryResult = ({
           </div>
           <span className="self-start sm:self-auto px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold font-mono">
             {row_count} {row_count === 1 ? 'row' : 'rows'} returned
+            {truncated && ' (result limit reached)'}
           </span>
         </div>
 

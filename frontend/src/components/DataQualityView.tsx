@@ -876,7 +876,7 @@ export const DataQualityView: React.FC<DataQualityViewProps> = ({
                   </span>
                 </div>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  Interactive live preview of verified dataset with auto-fixes and imputation applied
+                  Preview of the processed rows with their original row numbers
                 </span>
               </div>
             </div>
@@ -1082,7 +1082,7 @@ export const DataQualityView: React.FC<DataQualityViewProps> = ({
                   </span>
                 </div>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  Inferred data types, null percentage distributions, and automated imputation strategies
+                  Inferred types, missing values, and any imputation applied
                 </span>
               </div>
             </div>

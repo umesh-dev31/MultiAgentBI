@@ -14,7 +14,7 @@ export const ForecastChart = ({ forecastData }) => {
   } = forecastData
 
   const isInsufficient = confidence_level === 'insufficient' || confidence_level === 'none'
-  const isLowConfidence = confidence_level === 'low'
+  const isLowConfidence = ['low', 'unvalidated'].includes(confidence_level)
 
   // Combine points for continuous line plotting
   const allPoints = [
@@ -105,7 +105,7 @@ export const ForecastChart = ({ forecastData }) => {
               )}
             </h4>
             <p className="text-xs text-slate-500">
-              Aggregated monthly revenue trajectory with 3-month forward projection
+              Monthly observations and a three-month linear projection
             </p>
           </div>
         </div>
@@ -131,7 +131,7 @@ export const ForecastChart = ({ forecastData }) => {
           </svg>
           <div>
             <h5 className="font-bold text-xs uppercase tracking-wide text-amber-800">
-              Limited Historical Baseline Notice
+              Projection limitations
             </h5>
             <p className="text-xs font-medium mt-0.5 text-amber-900/90 leading-relaxed">
               {confidence_note}

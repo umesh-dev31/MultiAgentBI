@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { AnomalyList } from './AnomalyList'
 import { ForecastChart } from './ForecastChart'
 
+/** @param {{backendUrl: string, disabled?: boolean, hasData?: boolean, initialData?: any, currentDatasetId?: number | null}} props */
 export const MLInsightsView = ({
   backendUrl,
   disabled = false,
   hasData = false,
   initialData = null,
+  currentDatasetId = null,
 }) => {
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState(initialData)
@@ -19,13 +21,13 @@ export const MLInsightsView = ({
   }, [initialData])
 
   const fetchMLInsights = useCallback(async () => {
-    if (disabled || !hasData) return
+    if (disabled || !hasData || currentDatasetId == null) return
 
     setLoading(true)
     setError(null)
 
     try {
-      const response = await fetch(`${backendUrl}/api/ml-insights`, {
+      const response = await fetch(`${backendUrl}/api/datasets/${currentDatasetId}/analysis/ml-insights`, {
         method: 'POST',
       })
 
@@ -41,7 +43,7 @@ export const MLInsightsView = ({
     } finally {
       setLoading(false)
     }
-  }, [backendUrl, disabled, hasData])
+  }, [backendUrl, disabled, hasData, currentDatasetId])
 
   return (
     <div className="space-y-6">
@@ -55,7 +57,7 @@ export const MLInsightsView = ({
             </span>
           </h3>
           <p className="text-xs text-slate-600">
-            Unsupervised statistical outlier detection and linear regression trend forecasting computed on the validated subset.
+            Find unusual observations and view linear projections using eligible rows.
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -64,7 +66,7 @@ export const MLInsightsView = ({
           </span>
           <button
             onClick={fetchMLInsights}
-            disabled={loading || disabled}
+            disabled={loading || disabled || currentDatasetId == null}
             className="px-3 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-2xs transition cursor-pointer disabled:opacity-50"
             title="Recalculate ML insights"
           >
@@ -122,11 +124,13 @@ export const MLInsightsView = ({
           <ForecastChart forecastData={data.forecast} />
 
           {/* 2. Unsupervised Anomaly Detection Cards */}
-          <AnomalyList
+          {data.anomalies?.status === 'failed' || data.anomalies?.status === 'unavailable' ? (
+            <p role="status">{data.anomalies.error?.message || data.anomalies.note || 'Anomaly detection is unavailable.'}</p>
+          ) : <AnomalyList
             anomalies={data.anomalies?.anomalies || []}
             totalEvaluated={data.anomalies?.total_evaluated || 0}
             featuresUsed={data.anomalies?.features_used || []}
-          />
+          />}
         </div>
       )}
     </div>

@@ -1,194 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { QueryInput } from './QueryInput'
 import { ExampleQuestions } from './ExampleQuestions'
 import { QueryResult } from './QueryResult'
 
-/* ─────────────────────────────────────────────
-   Internal: animated chunk appearance for Stage 1
-   ───────────────────────────────────────────── */
-function ChunkAppearList({ chunks, visible }) {
-  const [shown, setShown] = useState([])
-
-  useEffect(() => {
-    if (!visible || chunks.length === 0) {
-      setShown([])
-      return
-    }
-    setShown([])
-    chunks.forEach((_, i) => {
-      setTimeout(() => {
-        setShown(prev => [...prev, i])
-      }, i * 320 + 80)
-    })
-  }, [visible, chunks])
-
-  if (!visible) return null
-
-  const typeColors = {
-    audit_issue: { bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.3)', label: '#f59e0b', tag: 'Audit Issue', icon: 'search' },
-    insight_summary: { bg: 'rgba(99,102,241,0.08)', border: 'rgba(99,102,241,0.3)', label: 'var(--accent-indigo)', tag: 'Executive Insight', icon: 'lightbulb' },
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {chunks.map((chunk, i) => {
-        const isVisible = shown.includes(i)
-        const colors = typeColors[chunk.chunk_type] || typeColors.audit_issue
-        return (
-          <div
-            key={i}
-            style={{
-              padding: '10px 14px',
-              borderRadius: 10,
-              background: colors.bg,
-              border: `1px solid ${colors.border}`,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 5,
-              opacity: isVisible ? 1 : 0,
-              transform: isVisible ? 'translateY(0)' : 'translateY(8px)',
-              transition: 'opacity 0.35s ease, transform 0.35s ease',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: '2px 7px',
-                    borderRadius: 4,
-                    background: colors.bg,
-                    color: colors.label,
-                    border: `1px solid ${colors.border}`,
-                  }}
-                >
-                  {colors.icon} {colors.tag}
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono, monospace)' }}>
-                  Dataset #{chunk.dataset_id}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>TF-IDF Match</span>
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    padding: '2px 8px',
-                    borderRadius: 6,
-                    background: chunk.score >= 1.5
-                      ? 'rgba(16,185,129,0.15)'
-                      : chunk.score >= 0.3
-                        ? 'rgba(245,158,11,0.15)'
-                        : 'rgba(148,163,184,0.1)',
-                    color: chunk.score >= 1.5 ? '#10b981' : chunk.score >= 0.3 ? '#f59e0b' : 'var(--text-muted)',
-                    border: `1px solid ${chunk.score >= 1.5 ? 'rgba(16,185,129,0.3)' : chunk.score >= 0.3 ? 'rgba(245,158,11,0.3)' : 'rgba(148,163,184,0.2)'}`,
-                    letterSpacing: '0.02em',
-                  }}
-                >
-                  {chunk.score.toFixed(2)}
-                </span>
-              </div>
-            </div>
-            <div
-              style={{
-                fontSize: 11.5,
-                color: 'var(--text-secondary)',
-                lineHeight: 1.5,
-                fontFamily: 'var(--font-mono, monospace)',
-                overflow: 'hidden',
-                display: '-webkit-box',
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: 'vertical',
-              }}
-            >
-              {chunk.text}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────
-   Internal: Stage animation indicator
-   ───────────────────────────────────────────── */
-function StageIndicator({ stage, label, doneLabel, description, active, done }) {
-  const displayLabel = done && doneLabel ? doneLabel : label
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'flex-start',
-      gap: 12,
-      padding: '10px 14px',
-      borderRadius: 10,
-      background: active
-        ? 'rgba(99,102,241,0.08)'
-        : done
-          ? 'rgba(16,185,129,0.06)'
-          : 'var(--bg-surface2)',
-      border: `1px solid ${active ? 'rgba(99,102,241,0.3)' : done ? 'rgba(16,185,129,0.2)' : 'var(--border-subtle)'}`,
-      transition: 'all 0.3s ease',
-    }}>
-      {/* Stage number / spinner */}
-      <div style={{
-        width: 28,
-        height: 28,
-        borderRadius: '50%',
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: active ? '#6366f1' : done ? '#10b981' : 'var(--bg-surface1)',
-        border: `2px solid ${active ? '#6366f1' : done ? '#10b981' : 'var(--border-medium)'}`,
-        transition: 'all 0.3s ease',
-        position: 'relative',
-        overflow: 'hidden',
-      }}>
-        {active ? (
-          <div style={{
-            width: 12,
-            height: 12,
-            borderRadius: '50%',
-            border: '2px solid rgba(255,255,255,0.4)',
-            borderTopColor: '#fff',
-            animation: 'spin 0.7s linear infinite',
-          }} />
-        ) : done ? (
-          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-        ) : (
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>{stage}</span>
-        )}
-      </div>
-      <div>
-        <div style={{
-          fontSize: 12,
-          fontWeight: 700,
-          color: active ? '#6366f1' : done ? '#10b981' : 'var(--text-muted)',
-          transition: 'color 0.3s',
-        }}>
-          Stage {stage} — {displayLabel}
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{description}</div>
-      </div>
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────
-   Main component
-   ───────────────────────────────────────────── */
 /**
  * @param {{
  *   backendUrl: string,
  *   disabled?: boolean,
  *   suggestedQuestions?: any[] | null,
  *   currentDatasetId?: number | null,
- *   datasetContext?: import('../../types/data').DatasetContext | null,
  *   qualityReport?: any,
  * }} props
  */
@@ -197,7 +17,6 @@ export const AskQuestionView = ({
   disabled = false,
   suggestedQuestions = null,
   currentDatasetId = null,
-  datasetContext = null,
   qualityReport = null,
   initialMode = 'sql',
 }) => {
@@ -224,23 +43,18 @@ export const AskQuestionView = ({
   const [ragError, setRagError] = useState(null)
   const [sourcesOpen, setSourcesOpen] = useState(true)
 
-  // RAG pipeline stage state: idle | retrieving | generating | done
-  const [ragStage, setRagStage] = useState('idle')
-  // Intermediate: chunks retrieved in stage 1 before answer is ready
-  const [previewChunks, setPreviewChunks] = useState([])
-
   // SQL handler
   const handleRunQuery = async (queryText) => {
     const q = queryText || question
-    if (!q || !q.trim() || loading || disabled) return
+    if (!q || !q.trim() || loading || disabled || currentDatasetId == null) return
     setLoading(true)
     setQueryError(null)
     setResultData(null)
     try {
-      const response = await fetch(`${backendUrl}/api/query`, {
+      const response = await fetch(`${backendUrl}/api/datasets/${currentDatasetId}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q.trim(), dataset_id: currentDatasetId, dataset_context: datasetContext }),
+        body: JSON.stringify({ question: q.trim() }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.detail || 'Failed to execute query.')
@@ -258,21 +72,16 @@ export const AskQuestionView = ({
     handleRunQuery(exampleText)
   }
 
-  // RAG handler with two-stage animation
+  // Knowledge questions
   const handleRunRAG = async (queryText) => {
     const q = queryText || ragQuestion
-    if (!q || !q.trim() || ragLoading) return
+    if (!q || !q.trim() || ragLoading || (ragScope === 'current' && currentDatasetId == null)) return
 
     setRagLoading(true)
     setRagError(null)
     setRagResult(null)
-    setPreviewChunks([])
-    setRagStage('retrieving')
 
     try {
-      // Single API call — but we animate stage 1 for a minimum visible duration
-      const startTime = Date.now()
-
       const response = await fetch(`${backendUrl}/api/knowledge/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -280,7 +89,6 @@ export const AskQuestionView = ({
           question: q.trim(),
           scope: ragScope,
           dataset_id: currentDatasetId,
-          dataset_context: ragScope === 'current' ? datasetContext : null,
         }),
       })
 
@@ -290,26 +98,10 @@ export const AskQuestionView = ({
         throw new Error(data.detail || 'Failed to query knowledge base.')
       }
 
-      // Show retrieved chunks in Stage 1 — at least 1.8s visible
-      const elapsed = Date.now() - startTime
-      const stage1Delay = Math.max(0, 1800 - elapsed)
-
-      setPreviewChunks(data.sources || [])
-      setRagStage('retrieving') // Still showing stage 1
-
-      await new Promise(res => setTimeout(res, stage1Delay))
-
-      // Transition to Stage 2
-      setRagStage('generating')
-      await new Promise(res => setTimeout(res, 700))
-
-      // Show final answer
       setRagResult(data)
       setSourcesOpen(true)
-      setRagStage('done')
     } catch (err) {
       setRagError(err instanceof Error ? err.message : 'An unexpected error occurred.')
-      setRagStage('idle')
     } finally {
       setRagLoading(false)
     }
@@ -323,7 +115,9 @@ export const AskQuestionView = ({
   const [ragDynamicQuestions, setRagDynamicQuestions] = useState(null)
 
   useEffect(() => {
+    if (ragScope === 'current' && currentDatasetId == null) return
     let active = true
+    setRagDynamicQuestions(null)
     const fetchKnowledgeSuggestions = async () => {
       try {
         const params = new URLSearchParams()
@@ -342,7 +136,7 @@ export const AskQuestionView = ({
     return () => { active = false }
   }, [backendUrl, currentDatasetId, ragScope])
 
-  const flaggedList = qualityReport?.flagged_for_review || datasetContext?.quality_report?.flagged_for_review || []
+  const flaggedList = qualityReport?.flagged_for_review || []
   const firstFlagged = flaggedList.length > 0 ? flaggedList[0] : null
   const firstFlaggedRow = firstFlagged ? (firstFlagged.row_index ?? 2) : null
   const firstFlaggedCol = firstFlagged ? firstFlagged.column : null
@@ -474,7 +268,6 @@ export const AskQuestionView = ({
             disabled={disabled || loading}
             backendUrl={backendUrl}
             initialQuestions={suggestedQuestions}
-            datasetContext={datasetContext}
             currentDatasetId={currentDatasetId}
           />
           <QueryResult
@@ -580,14 +373,14 @@ export const AskQuestionView = ({
             />
             <button
               type="submit"
-              disabled={ragLoading || !ragQuestion.trim()}
+              disabled={ragLoading || !ragQuestion.trim() || (ragScope === 'current' && currentDatasetId == null)}
               className="btn-primary"
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600 }}
             >
               {ragLoading ? (
                 <>
                   <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid currentColor', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
-                  {ragStage === 'retrieving' ? 'Retrieving...' : 'Generating...'}
+                  Finding an answer…
                 </>
               ) : (
                 <>
@@ -668,10 +461,7 @@ export const AskQuestionView = ({
                   </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                      RAG Pipeline — Knowledge Retrieval &amp; Synthesis
-                    </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono, monospace)' }}>
-                      TF-IDF cosine similarity across indexed chunks
+                      Knowledge answer
                     </div>
                   </div>
                 </div>
@@ -691,51 +481,7 @@ export const AskQuestionView = ({
                 )}
               </div>
 
-              {/* Stage indicators + content */}
-              <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Stage 1 */}
-                <StageIndicator
-                  stage={1}
-                  label="Retrieving relevant context…"
-                  doneLabel="Context retrieved"
-                  description={
-                    ragStage === 'generating' || ragStage === 'done'
-                      ? `${previewChunks.length} chunks from ${new Set(previewChunks.map(c => c.dataset_id)).size} dataset(s) — TF-IDF cosine similarity`
-                      : previewChunks.length > 0
-                        ? `Found ${previewChunks.length} relevant chunks — scanning knowledge base`
-                        : 'Scanning knowledge base with TF-IDF cosine similarity'
-                  }
-                  active={ragStage === 'retrieving'}
-                  done={ragStage === 'generating' || ragStage === 'done'}
-                />
-
-                {/* Stage 1 chunk preview — always show when chunks available */}
-                {(ragStage === 'retrieving' || ragStage === 'generating' || ragStage === 'done') && previewChunks.length > 0 && (
-                  <div style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--bg-surface2)', border: '1px solid var(--border-subtle)' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      Retrieved Chunks — Appearing One by One
-                    </div>
-                    <ChunkAppearList
-                      chunks={previewChunks}
-                      visible={ragStage === 'retrieving' || ragStage === 'generating' || ragStage === 'done'}
-                    />
-                  </div>
-                )}
-
-                {/* Stage 2 */}
-                <StageIndicator
-                  stage={2}
-                  label="Generating grounded answer…"
-                  doneLabel="Answer ready"
-                  description={
-                    ragStage === 'done'
-                      ? 'Synthesized from retrieved evidence — scroll down to read'
-                      : 'Feeding retrieved chunks to LLM for grounded synthesis'
-                  }
-                  active={ragStage === 'generating'}
-                  done={ragStage === 'done'}
-                />
-              </div>
+              {ragLoading && <p role="status" style={{ padding: '16px 18px' }}>Searching saved analysis…</p>}
 
               {/* ── FINAL ANSWER ── */}
               {ragResult && (
