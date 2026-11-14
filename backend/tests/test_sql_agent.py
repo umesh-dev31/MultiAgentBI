@@ -1,98 +1,71 @@
 import sqlite3
-import unittest
 import pandas as pd
+import pytest
 from agents.sql_agent import SQLAgent
 
+@pytest.fixture
+def frame():
+    return pd.DataFrame({'id':['001','002','003'],'revenue':[10,20,1000],'status':['UPDATE','OK','OK']})
 
-class TestSQLAgent(unittest.TestCase):
-    def setUp(self):
-        self.agent = SQLAgent()
-        self.df = pd.DataFrame({
-            "order_id": [101, 102, 103, 104, 105, 106],
-            "order_date": ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-06"],
-            "customer": ["Alice", "Bob", "Alice", "Charlie", "Alice", "BadCustomer"],
-            "region": ["North", "North", "South", "West", "North", "North"],
-            "product": ["Laptop", "Phone", "Laptop", "Tablet", "Laptop", "Laptop"],
-            "quantity": [2, 1, 3, 2, 4, -99],  # -99 is negative business-invalid
-            "unit_price": [1200.0, 800.0, 1200.0, 400.0, 1200.0, 1200.0],
-            "revenue": [2400.0, 800.0, 3600.0, 800.0, 4800.0, -118800.0],
-        })
+def test_filtered_count_and_unfiltered_count(frame):
+    agent = SQLAgent()
+    assert agent.generate_and_run('how many rows have revenue > 15',frame)['result']==[{'total_records':2}]
+    assert agent.generate_and_run('how many rows',frame)['result']==[{'total_records':3}]
 
-    def test_sql_safety_validation(self):
-        # Disallowed statements
-        is_safe, err = self.agent._validate_sql_safety("DROP TABLE orders;")
-        self.assertFalse(is_safe)
-        self.assertIsNotNone(err)
-        assert err is not None
-        self.assertIn("DROP", err)
+def test_shortcuts_do_not_ignore_order_or_extra_filters(frame):
+    agent = SQLAgent()
+    assert agent._match_deterministic_query('first 2 rows ordered by revenue descending',frame) is None
+    assert agent._match_deterministic_query('how many rows where revenue > 15 and status is OK',frame) is None
+    assert agent._match_deterministic_query('average revenue by status',frame) is None
 
-        is_safe, err = self.agent._validate_sql_safety("DELETE FROM orders WHERE order_id = 101;")
-        self.assertFalse(is_safe)
-        self.assertIsNotNone(err)
-        assert err is not None
-        self.assertIn("DELETE", err)
+@pytest.mark.parametrize('sql',["SELECT * FROM orders WHERE status='UPDATE'","SELECT 'DROP; -- literal' AS label FROM orders",'WITH x AS (SELECT revenue FROM orders) SELECT * FROM x'])
+def test_sql_literal_and_cte_allowed(sql,frame):
+    with sqlite3.connect(':memory:') as conn:
+        frame.to_sql('orders',conn,index=False)
+        records,error = SQLAgent()._execute_sql(conn,sql)
+        assert error is None
 
-        is_safe, err = self.agent._validate_sql_safety("INSERT INTO orders VALUES (999, 'X');")
-        self.assertFalse(is_safe)
+@pytest.mark.parametrize('sql',['UPDATE orders SET revenue=0','DELETE FROM orders','DROP TABLE orders','SELECT * FROM orders; DELETE FROM orders',"SELECT load_extension('x')",'SELECT * FROM sqlite_master'])
+def test_sql_modifications_and_system_access_blocked(sql,frame):
+    with sqlite3.connect(':memory:') as conn:
+        frame.to_sql('orders',conn,index=False)
+        _,error = SQLAgent()._execute_sql(conn,sql)
+        assert error
+        assert conn.execute('SELECT SUM(revenue) FROM orders').fetchone()[0]==1030
 
-        is_safe, err = self.agent._validate_sql_safety("UPDATE orders SET quantity = 10;")
-        self.assertFalse(is_safe)
+def test_sql_row_and_byte_truncation(frame,monkeypatch):
+    monkeypatch.setenv('SQL_MAX_ROWS','2')
+    agent = SQLAgent()
+    result = agent.generate_and_run('first 3 rows',frame)
+    assert result['truncated'] and result['row_count']==2
+    monkeypatch.setenv('SQL_MAX_BYTES','10')
+    assert agent.generate_and_run('first 3 rows',frame)['truncated']
 
-        # Allowed statement
-        is_safe, err = self.agent._validate_sql_safety("SELECT region, SUM(revenue) FROM orders GROUP BY region")
-        self.assertTrue(is_safe)
-        self.assertIsNone(err)
+def test_sql_execution_deadline(frame,monkeypatch):
+    monkeypatch.setenv('SQL_TIMEOUT_SECONDS','.001')
+    with sqlite3.connect(':memory:') as conn:
+        frame.to_sql('orders',conn,index=False)
+        _,error = SQLAgent()._execute_sql(conn,'WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x WHERE n<100000000) SELECT SUM(n) FROM x')
+        assert error
 
-    def test_validated_subset_excludes_invalid_rows(self):
-        validated_df = self.agent._filter_validated_subset(self.df)
-        # Should exclude row 106 with negative quantity (-99)
-        self.assertEqual(len(validated_df), 5)
-        self.assertNotIn(-99, validated_df["quantity"].values)
+def test_provider_translation_and_retry_are_offline(frame,monkeypatch):
+    agent = SQLAgent()
+    responses = iter(['SELECT missing FROM orders','SELECT AVG(revenue) AS average FROM orders'])
+    monkeypatch.setattr(agent,'_call_llm',lambda *a,**k:next(responses))
+    result = agent.generate_and_run('average revenue',frame)
+    assert result['error'] is None and result['result'][0]['average']==pytest.approx(1030/3)
 
-    def test_generate_and_run_revenue_by_region(self):
-        result = self.agent.generate_and_run("What is the total revenue by region?", self.df)
-        self.assertIsNone(result["error"])
-        self.assertGreater(result["row_count"], 0)
-        self.assertIn("SELECT", result["generated_sql"].upper())
-        regions = [r.get("region") for r in result["result"] if "region" in r]
-        self.assertIn("North", regions)
+def test_explicit_numeric_constraints_produce_null_not_row_deletion(monkeypatch):
+    frame = pd.DataFrame({'revenue':[-10,20]})
+    frame.attrs['numeric_constraints']={'revenue':{'minimum':0}}
+    agent = SQLAgent()
+    monkeypatch.setattr(agent,'_call_llm',lambda *a,**k:'SELECT SUM(revenue) AS total, COUNT(*) AS rows FROM orders')
+    result = agent.generate_and_run('total and count',frame)
+    assert result['result']==[{'total':20,'rows':2}]
+    assert result['column_populations']['revenue']['excluded_rows']==1
 
-    def test_generate_and_run_top_customers(self):
-        result = self.agent.generate_and_run("Top 2 customers by order count", self.df)
-        self.assertIsNone(result["error"])
-        self.assertLessEqual(result["row_count"], 2)
-
-    def test_generate_and_run_suggested_queries(self):
-        # Query 1: Total quantity by order_date
-        r1 = self.agent.generate_and_run("Total quantity by order_date", self.df)
-        self.assertIsNone(r1["error"])
-        self.assertGreater(r1["row_count"], 0)
-        self.assertIn("quantity", r1["generated_sql"].lower())
-        self.assertIn("order_date", r1["generated_sql"].lower())
-
-        # Query 2: Highest quantity recorded by order_date
-        r2 = self.agent.generate_and_run("Highest quantity recorded by order_date", self.df)
-        self.assertIsNone(r2["error"])
-        self.assertGreater(r2["row_count"], 0)
-        self.assertIn("MAX", r2["generated_sql"].upper())
-
-        # Query 3: Average quantity grouped by customer
-        r3 = self.agent.generate_and_run("Average quantity grouped by customer", self.df)
-        self.assertIsNone(r3["error"])
-        self.assertGreater(r3["row_count"], 0)
-        self.assertIn("AVG", r3["generated_sql"].upper())
-
-        # Query 4: Top 5 customer ranked by quantity
-        r4 = self.agent.generate_and_run("Top 5 customer ranked by quantity", self.df)
-        self.assertIsNone(r4["error"])
-        self.assertGreater(r4["row_count"], 0)
-        self.assertIn("LIMIT 5", r4["generated_sql"].upper())
-
-    def test_retry_mechanism_on_bad_sql(self):
-        records, err = self.agent._execute_sql(sqlite3.connect(":memory:"), "SELECT non_existent_col FROM nonexistent_tbl")
-        self.assertIsNotNone(err)
-        self.assertEqual(len(records), 0)
-
-
-if __name__ == "__main__":
-    unittest.main()
+def test_sql_large_scalar_allocation_is_limited(frame):
+    with sqlite3.connect(':memory:') as conn:
+        frame.to_sql('orders',conn,index=False)
+        _,error=SQLAgent()._execute_sql(conn,'SELECT randomblob(100000000) FROM orders')
+        assert error

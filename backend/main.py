@@ -1,798 +1,304 @@
+"""HTTP contracts and compatibility adapters for a persistent personal backend."""
 import asyncio
-import json
-import os
-import shutil
-import tempfile
-import uuid
 import html
-from typing import Any, Dict, Optional
-import pandas as pd
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+import json
+import re
+import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Literal
+from fastapi import FastAPI,File,Form,UploadFile,Request,Response,Query
+from fastapi.responses import JSONResponse,StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, Response
-
-from dotenv import load_dotenv
-from pydantic import BaseModel
-
-from agents.data_agent import DataAgent
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel,Field,ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
+from config import Settings
+from contracts import ImportOptions
+from db.database import make_engine,init_db
+from db.models import BrowserDataset
+from repository import DatasetRepository,DomainError
+from jobs import JobManager,TERMINAL
 from agents.eda_agent import EDAAgent
-from agents.sql_agent import SQLAgent
 from agents.ml_agent import MLAgent
-from agents.visualization_agent import VisualizationAgent
+from agents.sql_agent import SQLAgent
 from agents.insight_agent import InsightAgent
+from agents.visualization_agent import VisualizationAgent
 from agents.knowledge_agent import KnowledgeAgent
 
-from db.database import SessionLocal, init_db
-from db.models import Dataset, PipelineRun, AuditIssue, KnowledgeChunk
-
-load_dotenv()
-
-app = FastAPI(
-    title="AgentInsight AI Backend",
-    description="Multi-agent AI Business Intelligence Platform - Data Ingestion & Preprocessing",
-    version="0.1.0",
-)
-
-# Configure CORS to permit requests from Vite default dev server and Vercel deployments
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:5174",
-    "http://127.0.0.1:5174",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?|https://.*\.vercel\.app",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-data_agent = DataAgent()
-eda_agent = EDAAgent()
-sql_agent = SQLAgent()
-ml_agent = MLAgent()
-visualization_agent = VisualizationAgent()
-insight_agent = InsightAgent()
-knowledge_agent = KnowledgeAgent()
-
-# ── Multi-Agent LangGraph Orchestration & Session Store ───────────────────────
-from orchestrator.graph import Orchestrator
-
-orchestrator = Orchestrator(knowledge_agent=knowledge_agent)
-
-# Session memory stores
-current_cleaned_df: Optional[pd.DataFrame] = None
-current_validated_df: Optional[pd.DataFrame] = None
-current_quality_report: Optional[dict] = None
-current_suggested_questions: Optional[list] = None
-current_pipeline_result: Optional[dict] = None
-current_dataset_id: Optional[int] = None
-
-# Registry for SSE real-time event queues keyed by session_id
-pipeline_event_queues: Dict[str, asyncio.Queue] = {}
-pipeline_status_store: Dict[str, Dict[str, Any]] = {}
-main_loop: Optional[asyncio.AbstractEventLoop] = None
-
-
-@app.on_event("startup")
-async def startup_event():
-    global main_loop
-    try:
-        init_db()
-        print("[AgentInsight Backend] Database initialized at backend/data/agentinsight.db")
-    except Exception as e:
-        print(f"[AgentInsight Backend] Database init warning: {e}")
-    try:
-        main_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        main_loop = None
-
+COOKIE = 'insight_session'
 
 class QueryRequest(BaseModel):
-    question: str
-    dataset_id: Optional[int] = None
-
-
-@app.get("/health")
-def health_check():
-    """Health check endpoint to verify backend connectivity."""
-    return {"status": "ok"}
-
-
-@app.get("/api/pipeline/status/{run_id}")
-def get_pipeline_run_status(run_id: str):
-    """Status polling endpoint keyed by run ID, returning real LangGraph execution state."""
-    session_data = pipeline_status_store.get(run_id)
-    if not session_data:
-        return {"status": "pending", "events": [], "run_id": run_id, "stages": {}}
-    return session_data
-
-
-@app.get("/api/pipeline/status")
-def get_pipeline_status(
-    run_id: Optional[str] = Query(None),
-    session_id: Optional[str] = Query(None),
-):
-    """Status polling fallback returning all recorded execution events for a session or run ID."""
-    rid = run_id or session_id
-    if not rid:
-        return {"status": "pending", "events": [], "stages": {}}
-    session_data = pipeline_status_store.get(rid)
-    if not session_data:
-        return {"status": "pending", "events": [], "run_id": rid, "stages": {}}
-    return session_data
-
-
-@app.get("/api/pipeline/stream")
-async def stream_pipeline_events(session_id: str = Query(...)):
-    """Server-Sent Events endpoint streaming real-time stage execution updates
-    for a given pipeline session as each LangGraph node starts and completes.
-    """
-    global main_loop
-    if main_loop is None:
-        try:
-            main_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-
-    if session_id not in pipeline_event_queues:
-        pipeline_event_queues[session_id] = asyncio.Queue()
-
-    if session_id not in pipeline_status_store:
-        pipeline_status_store[session_id] = {
-            "session_id": session_id,
-            "status": "running",
-            "events": [],
-            "current_node": None,
-            "error": None,
-        }
-
-    queue = pipeline_event_queues[session_id]
-
-    async def event_generator():
-        # Emit initial connection handshake
-        yield f"data: {json.dumps({'status': 'connected', 'session_id': session_id})}\n\n"
-        
-        # If there are already buffered events in pipeline_status_store, emit them so late-connecting clients catch up
-        if session_id in pipeline_status_store:
-            for past_event in pipeline_status_store[session_id].get("events", []):
-                yield f"data: {json.dumps(past_event)}\n\n"
-                if past_event.get("node") == "pipeline" and past_event.get("status") in ("completed", "failed"):
-                    return
-
-        try:
-            while True:
-                try:
-                    # Wait for next event with a 15s timeout for heartbeat keep-alive
-                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield f"data: {json.dumps(event)}\n\n"
-                    # If pipeline reached terminal state, finish stream
-                    if event.get("node") == "pipeline" and event.get("status") in ("completed", "failed"):
-                        break
-                except asyncio.TimeoutError:
-                    # Heartbeat ping to keep SSE connection alive
-                    yield ": ping\n\n"
-        except asyncio.CancelledError:
-            pass
-        finally:
-            pipeline_event_queues.pop(session_id, None)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "Access-Control-Allow-Origin": "*",
-        },
-    )
-
-
-@app.post("/api/pipeline/run")
-def run_full_pipeline(
-    file: UploadFile = File(...),
-    session_id: Optional[str] = Query(None),
-    run_id: Optional[str] = Query(None),
-):
-    """Accepts an uploaded dataset file, executes the full LangGraph multi-agent
-    orchestrated pipeline, streams live node events if run_id or session_id is provided,
-    stores session state, and returns all agent outputs.
-    """
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file selected for upload.")
-
-    _, ext = os.path.splitext(file.filename.lower())
-    if ext not in [".csv", ".xlsx", ".xls"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file format '{ext}'. Only .csv, .xlsx, or .xls files are accepted.",
-        )
-
-    temp_dir = tempfile.mkdtemp(prefix="agentinsight_pipeline_")
-    safe_filename = os.path.basename(file.filename.replace("\\", "/"))
-    temp_file_path = os.path.join(temp_dir, safe_filename)
-
-    actual_id = run_id or session_id
-
-    if actual_id:
-        if actual_id not in pipeline_event_queues:
-            pipeline_event_queues[actual_id] = asyncio.Queue()
-        if actual_id not in pipeline_status_store:
-            pipeline_status_store[actual_id] = {
-                "run_id": actual_id,
-                "session_id": actual_id,
-                "status": "running",
-                "events": [],
-                "stages": {},
-                "current_node": None,
-                "error": None,
-            }
-
-    def dispatch_event(event_dict: dict):
-        global main_loop
-        if actual_id:
-            if actual_id in pipeline_status_store:
-                pipeline_status_store[actual_id]["events"].append(event_dict)
-                node_name = event_dict.get("node")
-                if node_name and node_name != "pipeline":
-                    pipeline_status_store[actual_id]["stages"][node_name] = {
-                        "node": node_name,
-                        "status": event_dict.get("status"),
-                        "duration_ms": event_dict.get("duration_ms", 0.0),
-                        "details": event_dict.get("details", ""),
-                        "witty_label": event_dict.get("witty_label", ""),
-                    }
-                    pipeline_status_store[actual_id]["current_node"] = node_name
-                if "status" in event_dict:
-                    pipeline_status_store[actual_id]["current_status"] = event_dict.get("status")
-
-            if actual_id in pipeline_event_queues:
-                loop = main_loop
-                if loop is None:
-                    try:
-                        loop = asyncio.get_event_loop()
-                    except RuntimeError:
-                        loop = None
-                if loop and loop.is_running():
-                    try:
-                        loop.call_soon_threadsafe(pipeline_event_queues[actual_id].put_nowait, event_dict)
-                    except Exception:
-                        pass
-
-    def event_callback(
-        node: str,
-        status: str,
-        duration_ms: float = 0.0,
-        details: str = "",
-        witty_label: str = "",
-    ):
-        data = {
-            "node": node,
-            "status": status,
-            "duration_ms": duration_ms,
-            "details": details,
-            "witty_label": witty_label,
-        }
-        dispatch_event(data)
-
-    try:
-        with open(temp_file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        # Execute the LangGraph pipeline with live event callback
-        state = Orchestrator(knowledge_agent=knowledge_agent).run_pipeline(temp_file_path, event_callback=event_callback)
-
-        if state.get("errors"):
-            err_msg = "; ".join(state["errors"])
-            err_event = {
-                "node": "pipeline",
-                "status": "failed",
-                "error": err_msg,
-            }
-            if actual_id in pipeline_status_store:
-                pipeline_status_store[actual_id]["status"] = "failed"
-                pipeline_status_store[actual_id]["error"] = err_msg
-            dispatch_event(err_event)
-            raise HTTPException(
-                status_code=400,
-                detail=err_msg,
-            )
-
-        # Update global session store
-        global current_cleaned_df, current_quality_report, current_suggested_questions, current_validated_df, current_pipeline_result, current_dataset_id
-        current_cleaned_df = state.get("cleaned_df")
-        current_validated_df = state.get("validated_df")
-        current_quality_report = state.get("data_quality_report")
-        current_suggested_questions = state.get("suggested_questions")
-        current_dataset_id = state.get("dataset_id")
-
-        result = {
-            "status": "success",
-            "dataset_id": current_dataset_id,
-            "filename": file.filename,
-            "dataset_summary": state.get("dataset_summary"),
-            "data_quality_report": state.get("data_quality_report"),
-            "data_health_score": state.get("data_health_score") or (state.get("data_quality_report") or {}).get("data_health_score"),
-            "eda_result": state.get("eda_result"),
-            "ml_result": state.get("ml_result"),
-            "visualization_result": state.get("visualization_result"),
-            "insight_result": state.get("insight_result"),
-            "suggested_questions": state.get("suggested_questions"),
-            "execution_logs": state.get("execution_logs"),
-        }
-        current_pipeline_result = result
-
-        comp_event = {
-            "node": "pipeline",
-            "status": "completed",
-            "result": result,
-        }
-        if actual_id in pipeline_status_store:
-            pipeline_status_store[actual_id]["status"] = "completed"
-            pipeline_status_store[actual_id]["result"] = result
-        dispatch_event(comp_event)
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        err_event = {
-            "node": "pipeline",
-            "status": "failed",
-            "error": str(exc),
-        }
-        if actual_id in pipeline_status_store:
-            pipeline_status_store[actual_id]["status"] = "failed"
-            pipeline_status_store[actual_id]["error"] = str(exc)
-        dispatch_event(err_event)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Pipeline execution failed for '{file.filename}': {str(exc)}",
-        )
-    finally:
-        try:
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-
-# ── Historical Dataset Runs & Persistent Storage ──────────────────────────────
-@app.get("/api/history")
-def get_dataset_history():
-    """Retrieves all past uploaded datasets sorted by most recent."""
-    session = SessionLocal()
-    try:
-        datasets = session.query(Dataset).order_by(Dataset.uploaded_at.desc()).all()
-        return [
-            {
-                "id": d.id,
-                "filename": d.filename,
-                "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
-                "row_count": d.row_count,
-                "validated_row_count": d.validated_row_count,
-                "flagged_count": d.flagged_count,
-            }
-            for d in datasets
-        ]
-    finally:
-        session.close()
-
-
-@app.get("/api/history/{dataset_id}")
-def get_historical_pipeline_run(dataset_id: int):
-    """Retrieves full pipeline run results for a past dataset upload, matching /api/pipeline/run shape."""
-    global current_cleaned_df, current_quality_report, current_suggested_questions, current_validated_df, current_pipeline_result, current_dataset_id
-    session = SessionLocal()
-    try:
-        dataset = session.query(Dataset).filter(Dataset.id == dataset_id).first()
-        if not dataset:
-            raise HTTPException(status_code=404, detail=f"Dataset with ID {dataset_id} not found.")
-
-        run = session.query(PipelineRun).filter(PipelineRun.dataset_id == dataset_id).order_by(PipelineRun.created_at.desc()).first()
-        if not run:
-            raise HTTPException(status_code=404, detail=f"No pipeline run found for dataset ID {dataset_id}.")
-
-        result = {
-            "status": "success",
-            "dataset_id": dataset.id,
-            "filename": dataset.filename,
-            "dataset_summary": run.dataset_summary,
-            "data_quality_report": run.audit_report,
-            "data_health_score": run.data_health_score or (run.audit_report or {}).get("data_health_score"),
-            "eda_result": run.eda_result,
-            "ml_result": run.ml_result,
-            "visualization_result": run.visualization_result,
-            "insight_result": run.insight_result,
-            "suggested_questions": run.suggested_questions,
-            "execution_logs": run.execution_logs,
-        }
-
-        # Restore in-memory session context for follow-up SQL and RAG queries
-        current_dataset_id = dataset.id
-        current_quality_report = run.audit_report
-        current_suggested_questions = run.suggested_questions
-        current_pipeline_result = result
-
-        # Reconstruct FULL validated_df and cleaned_df from persistent storage
-        if getattr(run, "validated_data", None):
-            current_validated_df = pd.DataFrame(run.validated_data)
-            current_validated_df.attrs["validated"] = True
-            current_validated_df.attrs["source_rows"] = (run.dataset_summary or {}).get("validated_source_rows", list(range(2, len(current_validated_df) + 2)))
-        elif getattr(run, "cleaned_data", None):
-            current_validated_df = pd.DataFrame(run.cleaned_data)
-        else:
-            preview_records = (run.dataset_summary or {}).get("cleaned_preview") or []
-            current_validated_df = pd.DataFrame(preview_records) if preview_records else None
-
-        if getattr(run, "cleaned_data", None):
-            current_cleaned_df = pd.DataFrame(run.cleaned_data)
-        else:
-            current_cleaned_df = current_validated_df
-
-        return result
-    finally:
-        session.close()
-
-
-# ── RAG Knowledge Agent Endpoint ──────────────────────────────────────────────
-class KnowledgeAskRequest(BaseModel):
-    question: str
-    scope: Optional[str] = "current"  # "current" | "all_history"
-    dataset_id: Optional[int] = None
-
-
-@app.post("/api/knowledge/ask")
-def ask_knowledge_agent(request: KnowledgeAskRequest):
-    """Answers meta-questions about audit issues or insights using RAG KnowledgeAgent."""
-    target_ds_id = request.dataset_id or current_dataset_id
-    try:
-        return knowledge_agent.answer_question(
-            question=request.question,
-            current_dataset_id=target_ds_id,
-            scope=request.scope or "current",
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Knowledge Agent retrieval failed: {str(exc)}",
-        )
-
-@app.get("/api/knowledge/suggested-questions")
-def get_knowledge_suggested_questions(
-    scope: str = "current",
-    dataset_id: Optional[int] = None,
-):
-    """Returns dynamic, schema- and audit-tailored suggested questions for the RAG Knowledge Agent."""
-    target_ds_id = dataset_id or current_dataset_id
-    try:
-        questions = knowledge_agent.get_suggested_questions(
-            current_dataset_id=target_ds_id,
-            scope=scope or "current",
-        )
-        return {"questions": questions}
-    except Exception as exc:
-        return {"questions": [
-            "What data quality issues were found in this dataset?",
-            "What was the executive recommendation for this dataset?",
-            "How does this dataset's data quality compare to my previous upload?",
-        ]}
-
-
-def _ensure_active_dataset(dataset_id: Optional[int] = None) -> Optional[pd.DataFrame]:
-    """Ensures current_validated_df and current_cleaned_df are populated in session memory.
-    If in-memory session is empty or a specific dataset_id is requested, restores from persistent DB.
-    """
-    global current_cleaned_df, current_validated_df, current_quality_report, current_suggested_questions, current_dataset_id
-    if dataset_id is not None and dataset_id != current_dataset_id:
-        session = SessionLocal()
-        try:
-            run = session.query(PipelineRun).filter(PipelineRun.dataset_id == dataset_id).order_by(PipelineRun.created_at.desc()).first()
-            if run:
-                current_dataset_id = dataset_id
-                current_quality_report = run.audit_report
-                current_suggested_questions = run.suggested_questions
-                if getattr(run, "validated_data", None):
-                    current_validated_df = pd.DataFrame(run.validated_data)
-                    current_validated_df.attrs["validated"] = True
-                    current_validated_df.attrs["source_rows"] = (run.dataset_summary or {}).get("validated_source_rows", list(range(2, len(current_validated_df) + 2)))
-                elif getattr(run, "cleaned_data", None):
-                    current_validated_df = pd.DataFrame(run.cleaned_data)
-                if getattr(run, "cleaned_data", None):
-                    current_cleaned_df = pd.DataFrame(run.cleaned_data)
-                else:
-                    current_cleaned_df = current_validated_df
-                return current_validated_df if current_validated_df is not None else current_cleaned_df
-            raise HTTPException(status_code=404, detail=f"Dataset with ID {dataset_id} not found.")
-        finally:
-            session.close()
-
-    target_df = current_validated_df if current_validated_df is not None else current_cleaned_df
-    if target_df is not None and not target_df.empty:
-        return target_df
-
-    # Auto-restore latest dataset if available in DB
-    session = SessionLocal()
-    try:
-        latest_run = session.query(PipelineRun).order_by(PipelineRun.created_at.desc()).first()
-        if latest_run:
-            current_dataset_id = latest_run.dataset_id
-            current_quality_report = latest_run.audit_report
-            current_suggested_questions = latest_run.suggested_questions
-            if getattr(latest_run, "validated_data", None):
-                current_validated_df = pd.DataFrame(latest_run.validated_data)
-                current_validated_df.attrs["validated"] = True
-                current_validated_df.attrs["source_rows"] = (latest_run.dataset_summary or {}).get("validated_source_rows", list(range(2, len(current_validated_df) + 2)))
-            elif getattr(latest_run, "cleaned_data", None):
-                current_validated_df = pd.DataFrame(latest_run.cleaned_data)
-            else:
-                preview = (latest_run.dataset_summary or {}).get("cleaned_preview") or []
-                current_validated_df = pd.DataFrame(preview) if preview else None
-
-            if getattr(latest_run, "cleaned_data", None):
-                current_cleaned_df = pd.DataFrame(latest_run.cleaned_data)
-            else:
-                current_cleaned_df = current_validated_df
-            return current_validated_df if current_validated_df is not None else current_cleaned_df
-    finally:
-        session.close()
-
-    return None
-
-
-@app.post("/api/query")
-def run_sql_query(request: QueryRequest):
-    """Executes a natural language business question by translating it to a safe SQLite query,
-    running it on the validated subset of current dataset, and returning results with retry handling.
-    """
-    global current_cleaned_df, current_quality_report, current_validated_df, current_dataset_id
-    target_df = _ensure_active_dataset(request.dataset_id)
-    if target_df is None or target_df.empty:
-        raise HTTPException(
-            status_code=400,
-            detail="No cleaned dataset found in session. Please upload a dataset first.",
-        )
-    try:
-        qr = current_quality_report if current_validated_df is None else None
-        return sql_agent.generate_and_run(
-            question=request.question,
-            df=target_df,
-            quality_report=qr,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to process natural language query: {str(exc)}",
-        )
-
-
-@app.get("/api/suggested-questions")
-def get_suggested_questions(refresh: bool = False, dataset_id: Optional[int] = None):
-    """Returns 3-4 schema-relevant business questions for the currently loaded dataset,
-    dynamically generated by SQLAgent based on actual column names and data types.
-    """
-    global current_cleaned_df, current_quality_report, current_suggested_questions
-    target_df = _ensure_active_dataset(dataset_id)
-    if target_df is None or target_df.empty:
-        return {"questions": sql_agent.get_default_fallback_questions()}
-
-    if current_suggested_questions is None or refresh:
-        try:
-            current_suggested_questions = sql_agent.generate_suggested_questions(
-                target_df, quality_report=current_quality_report
-            )
-        except Exception:
-            return {"questions": sql_agent.get_default_fallback_questions()}
-
-    return {"questions": current_suggested_questions}
-
-
-@app.post("/api/eda")
-def run_exploratory_analysis():
-    """Runs the EDAAgent on the already-cleaned dataset from the previous upload."""
-    global current_cleaned_df, current_quality_report, current_validated_df
-    target_df = current_validated_df if current_validated_df is not None else current_cleaned_df
-    if target_df is None or target_df.empty:
-        raise HTTPException(
-            status_code=400,
-            detail="No cleaned dataset found in session. Please upload a dataset first.",
-        )
-    try:
-        return eda_agent.analyze(
-            target_df, quality_report=current_quality_report if current_validated_df is None else None
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to generate exploratory analysis: {str(exc)}",
-        )
-
-
-@app.post("/api/ml-insights")
-def run_ml_insights():
-    """Runs the MLAgent to perform unsupervised anomaly detection (IsolationForest)
-    and trend forecasting with honest data-sufficiency confidence evaluations.
-    """
-    global current_cleaned_df, current_quality_report, current_validated_df
-    target_df = current_validated_df if current_validated_df is not None else current_cleaned_df
-    if target_df is None or target_df.empty:
-        raise HTTPException(
-            status_code=400,
-            detail="No cleaned dataset found in session. Please upload a dataset first.",
-        )
-    try:
-        return ml_agent.analyze(
-            target_df, quality_report=current_quality_report if current_validated_df is None else None
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to generate machine learning insights: {str(exc)}",
-        )
-
-
-@app.post("/api/insights")
-def run_business_insights():
-    """Runs the VisualizationAgent and InsightAgent to produce:
-    1. 2-3 recommended chart specifications with aggregated data.
-    2. An LLM-generated executive summary with key finding and actionable recommendation
-       strictly grounded in real dataset numbers and anomalies.
-    """
-    global current_cleaned_df, current_quality_report, current_validated_df
-    target_df = current_validated_df if current_validated_df is not None else current_cleaned_df
-    if target_df is None or target_df.empty:
-        raise HTTPException(
-            status_code=400,
-            detail="No cleaned dataset found in session. Please upload a dataset first.",
-        )
-    try:
-        qr = current_quality_report if current_validated_df is None else None
-        # Run EDA & ML agents to obtain full analytical context
-        eda_result = eda_agent.analyze(target_df, quality_report=qr)
-        ml_result = ml_agent.analyze(target_df, quality_report=qr)
-
-        # Generate chart recommendations
-        chart_specs = visualization_agent.suggest_charts(
-            target_df, eda_result=eda_result, quality_report=qr
-        )
-
-        # Generate LLM-powered executive summary
-        summary_res = insight_agent.generate_summary(eda_result=eda_result, ml_result=ml_result)
-
-        return {
-            "summary": summary_res.get("summary", ""),
-            "key_finding": summary_res.get("key_finding", ""),
-            "recommendation": summary_res.get("recommendation", ""),
-            "charts": chart_specs.get("charts", []),
-        }
-    except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to generate business insights: {str(exc)}",
-        )
-
-
-@app.post("/api/upload")
-def upload_dataset(file: UploadFile = File(...)):
-    """Accepts a CSV or Excel dataset, validates and cleans the data using DataAgent,
-    and returns a summary, column details, and preview.
-    """
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file selected for upload.")
-
-    _, ext = os.path.splitext(file.filename.lower())
-    if ext not in [".csv", ".xlsx", ".xls"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file format '{ext}'. Only .csv, .xlsx, or .xls files are accepted.",
-        )
-
-    # Save to a temporary file safely
-    temp_dir = tempfile.mkdtemp(prefix="agentinsight_")
-    safe_filename = os.path.basename(file.filename.replace("\\", "/"))
-    temp_file_path = os.path.join(temp_dir, safe_filename)
-
-    try:
-        with open(temp_file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        # Process through the Data Agent
-        result = data_agent.process(temp_file_path)
-
-        # Store cleaned DataFrame and quality report in session memory for EDA
-        global current_cleaned_df, current_quality_report, current_suggested_questions, current_validated_df, current_dataset_id, current_pipeline_result
-        current_validated_df = None
-        current_dataset_id = None
-        current_pipeline_result = None
-        current_cleaned_df = data_agent.last_cleaned_df
-        current_quality_report = result.get("data_quality_report")
-        current_suggested_questions = None  # Reset cached questions for new schema
-
-        return result
-
-    except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to process dataset '{file.filename}': {str(exc)}",
-        )
-    finally:
-        # Clean up temporary storage
-        try:
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-
-@app.get("/api/export/{dataset_id}")
-def export_dataset(dataset_id: int, format: str = Query("json", pattern="^(json|csv|html)$")):
-    """Download a saved analysis or full cleaned CSV without changing active session."""
-    session = SessionLocal()
-    try:
-        dataset = session.get(Dataset, dataset_id)
-        run = session.query(PipelineRun).filter(PipelineRun.dataset_id == dataset_id).order_by(PipelineRun.created_at.desc()).first()
-        if dataset is None or run is None:
-            raise HTTPException(status_code=404, detail="Saved dataset not found.")
-        report = {"dataset": dataset.to_dict(), "data_quality_report": run.audit_report,
-                  "eda_result": run.eda_result, "ml_result": run.ml_result,
-                  "visualization_result": run.visualization_result, "insight_result": run.insight_result,
-                  "execution_logs": run.execution_logs}
-        if format == "csv":
-            if run.cleaned_data is None:
-                raise HTTPException(status_code=409, detail="This older run has no complete cleaned dataset. Please upload it again.")
-            data = pd.DataFrame(run.cleaned_data)
-            # Avoid spreadsheet formula execution when exported text is opened in Excel.
-            for col in data.columns:
-                data[col] = data[col].map(lambda value: "'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value)
-            content = '\ufeff' + data.to_csv(index=False)
-            media_type = "text/csv"
-        elif format == "html":
-            title = html.escape(dataset.filename)
-            sections = "".join("<section><h2>" + html.escape(key.replace("_", " ").title()) + "</h2><pre>" + html.escape(json.dumps(value, indent=2, ensure_ascii=False, default=str)) + "</pre></section>" for key, value in report.items())
-            content = '<!doctype html><html><head><meta charset="utf-8"><title>AgentInsight Analysis</title><style>body{font:15px system-ui;max-width:1000px;margin:40px auto;padding:24px;color:#172033}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px monospace}section{border-top:1px solid #ddd;padding:16px 0}button{padding:10px 16px}@media print{button{display:none}}</style></head><body><h1>AgentInsight AI</h1><p>' + title + '</p><button onclick="window.print()">Print / Save as PDF</button>' + sections + '</body></html>'
-            media_type = "text/html"
-        else:
-            content = json.dumps(report, ensure_ascii=False, indent=2, default=str)
-            media_type = "application/json"
-        return Response(content, media_type=media_type,
-                        headers={"Content-Disposition": f'attachment; filename="agentinsight-{dataset_id}.{format}"'})
-    finally:
-        session.close()
-
+    question: str = Field(min_length=1,max_length=4000)
+    dataset_id: int | None = Field(default=None,gt=0)
+
+class KnowledgeRequest(QueryRequest):
+    scope: Literal['current','all_history'] = 'current'
 
 class DatabaseImportRequest(BaseModel):
-    table: str
+    table: str = Field(min_length=1,max_length=255)
 
-@app.get("/api/database/tables")
-def list_source_tables():
-    if not os.getenv("ANALYTICS_DATABASE_URL"):
-        return {"configured": False, "tables": []}
-    from db.source import source_tables
-    try:
-        return {"configured": True, "tables": source_tables()}
-    except Exception:
-        raise HTTPException(status_code=400, detail="Cannot connect to the configured analytics database. Check its URL, driver and permissions.")
+def create_app(settings=None,start_worker=True):
+    settings = settings or Settings()
+    @asynccontextmanager
+    async def lifespan(app):
+        settings.prepare()
+        engine = make_engine(settings.database_url)
+        try:
+            init_db(engine)
+            sessions = sessionmaker(bind=engine,expire_on_commit=False)
+            app.state.sessions = sessions
+            app.state.repository = DatasetRepository(sessions)
+            app.state.jobs = JobManager(settings,sessions)
+            if start_worker:
+                app.state.jobs.start()
+            yield
+        finally:
+            if hasattr(app.state,'jobs'):
+                app.state.jobs.close()
+            engine.dispose()
+    app = FastAPI(title='AgentInsight AI Backend',version='0.2.0',lifespan=lifespan)
+    app.add_middleware(CORSMiddleware,allow_origin_regex=r'https?://(localhost|127\.0\.0\.1)(:\d+)?',allow_credentials=True,allow_methods=['GET','POST'],allow_headers=['Content-Type'])
 
-@app.post("/api/database/extract")
-def extract_source_table(request: DatabaseImportRequest):
-    from db.source import extract_table
-    try:
-        frame = extract_table(request.table)
-        return Response(frame.to_csv(index=False), media_type="text/csv")
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Table not found in the configured analytics database.")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception:
-        raise HTTPException(status_code=400, detail="Database import failed. Check the source connection and table permissions.")
+    @app.exception_handler(DomainError)
+    async def domain_error(request,error):
+        return JSONResponse(status_code=error.status,content={'detail':error.message,'error':{'code':error.code,'message':error.message}})
+
+    @app.exception_handler(SQLAlchemyError)
+    async def storage_error(request,error):
+        return JSONResponse(status_code=503,content={'detail':'Storage is unavailable.','error':{'code':'STORAGE_UNAVAILABLE','message':'Storage is unavailable.'}})
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request,error):
+        return JSONResponse(status_code=422,content={'detail':'Request fields are invalid.','error':{'code':'INVALID_INPUT','message':'Request fields are invalid.'}})
+
+    @app.exception_handler(ValueError)
+    async def analysis_value_error(request,error):
+        return JSONResponse(status_code=422,content={'detail':'The requested analysis cannot produce a valid result.','error':{'code':'ANALYSIS_INVALID','message':'The requested analysis cannot produce a valid result.'}})
+
+    def browser(request,response):
+        session_id = request.cookies.get(COOKIE)
+        if not session_id or not re.fullmatch(r'[a-f0-9]{32}',session_id):
+            session_id = uuid.uuid4().hex
+        response.set_cookie(COOKIE,session_id,httponly=True,samesite='strict',max_age=30*24*3600)
+        return session_id
+
+    def resolve(request,dataset_id):
+        return app.state.repository.resolve(dataset_id,request.cookies.get(COOKIE))
+
+    async def submit(file,options,request,response,mode='full',run_id=None):
+        try:
+            policy = ImportOptions.model_validate_json(options)
+        except (ValidationError,ValueError):
+            raise DomainError(422,'INVALID_OPTIONS','Import options must be a valid JSON object.')
+        name = Path((file.filename or '').replace('\\','/')).name
+        suffix = Path(name).suffix.lower()
+        if suffix not in {'.csv','.xlsx','.xls'}:
+            raise DomainError(422,'INVALID_FORMAT','Select a CSV, XLSX or XLS file.')
+        if run_id and not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',run_id):
+            raise DomainError(422,'INVALID_RUN_ID','Invalid run ID.')
+        path = settings.data_dir / 'uploads' / (uuid.uuid4().hex+suffix)
+        try:
+            size = 0
+            with path.open('xb') as output:
+                while chunk := await file.read(65536):
+                    size += len(chunk)
+                    if size > settings.max_upload_bytes:
+                        raise DomainError(413,'UPLOAD_TOO_LARGE','Upload exceeds configured byte limit.')
+                    output.write(chunk)
+            if size==0:
+                raise DomainError(422,'EMPTY_UPLOAD','The uploaded file is empty.')
+            return app.state.jobs.submit(path,name,policy,browser(request,response),mode,run_id)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        finally:
+            await file.close()
+
+    async def wait_for_result(job_id):
+        # Compatibility wait only: disconnecting this request never cancels the persisted job.
+        while True:
+            status = app.state.jobs.status(job_id)
+            if status['state']=='failed':
+                error = status['error'] or {'code':'PIPELINE_FAILED','message':'Processing failed.'}
+                code = 422 if error['code']=='INVALID_INPUT' else 503
+                raise DomainError(code,error['code'],error['message'])
+            if status['state'] in TERMINAL:
+                return app.state.repository.snapshot(status['dataset_id'])
+            await asyncio.sleep(.1)
+
+    @app.get('/health')
+    def health():
+        from sqlalchemy import text
+        with app.state.sessions() as session:
+            session.execute(text('SELECT 1'))
+        return {'status':'ok'}
+
+    @app.post('/api/jobs',status_code=202)
+    async def create_job(request:Request,response:Response,file:UploadFile=File(...),options:str=Form('{}')):
+        job_id = await submit(file,options,request,response)
+        return {'job_id':job_id,'status':'queued','status_url':'/api/jobs/'+job_id}
+
+    @app.get('/api/jobs/{job_id}')
+    def get_job(job_id:str):
+        status = app.state.jobs.status(job_id)
+        if status['state'] in {'completed','completed_with_warnings'}:
+            status['result'] = app.state.repository.snapshot(status['dataset_id'])
+        return status
+
+    @app.post('/api/pipeline/run')
+    async def pipeline(request:Request,response:Response,file:UploadFile=File(...),options:str=Form('{}'),run_id:str|None=None,session_id:str|None=None):
+        job_id = await submit(file,options,request,response,run_id=run_id or session_id)
+        return await wait_for_result(job_id)
+
+    @app.post('/api/upload')
+    async def upload(request:Request,response:Response,file:UploadFile=File(...),options:str=Form('{}')):
+        job_id = await submit(file,options,request,response,mode='clean')
+        result = await wait_for_result(job_id)
+        return dict(result['dataset_summary'],dataset_id=result['dataset_id'],warnings=result['warnings'])
+
+    @app.get('/api/pipeline/status/{run_id}')
+    def old_status(run_id:str):
+        return app.state.jobs.status(run_id)
+
+    @app.get('/api/pipeline/status')
+    def old_status_query(run_id:str|None=None,session_id:str|None=None):
+        if not (run_id or session_id):
+            raise DomainError(422,'JOB_ID_REQUIRED','Supply a run ID.')
+        return app.state.jobs.status(run_id or session_id)
+
+    @app.get('/api/pipeline/stream')
+    async def stream(session_id:str,request:Request):
+        app.state.jobs.status(session_id)
+        async def events():
+            previous = None
+            while not await request.is_disconnected():
+                status = app.state.jobs.status(session_id)
+                encoded = json.dumps(status)
+                if encoded!=previous:
+                    yield 'data: '+encoded+'\n\n'
+                    previous = encoded
+                else:
+                    yield ': ping\n\n'
+                if status['state'] in TERMINAL:
+                    break
+                await asyncio.sleep(.5)
+        return StreamingResponse(events(),media_type='text/event-stream',headers={'Cache-Control':'no-cache'})
+
+    @app.get('/api/history')
+    def history():
+        return app.state.repository.history()
+
+    @app.get('/api/history/{dataset_id}')
+    def history_run(dataset_id:int,request:Request,response:Response):
+        result = app.state.repository.snapshot(dataset_id)
+        session_id = browser(request,response)
+        # Record only membership for ambiguity detection; no active-dataset pointer exists.
+        with app.state.sessions.begin() as session:
+            if session.get(BrowserDataset,(session_id,dataset_id)) is None:
+                session.add(BrowserDataset(session_id=session_id,dataset_id=dataset_id))
+        return result
+
+    @app.post('/api/datasets/{dataset_id}/query')
+    def dataset_query(dataset_id:int,body:QueryRequest):
+        context = app.state.repository.context(dataset_id)
+        return dict(SQLAgent().generate_and_run(body.question,context.frame),dataset_id=dataset_id)
+
+    @app.post('/api/query')
+    def legacy_query(body:QueryRequest,request:Request):
+        return dataset_query(resolve(request,body.dataset_id),body)
+
+    def analyze(dataset_id,kind):
+        context = app.state.repository.context(dataset_id)
+        if kind=='eda':
+            result = EDAAgent().analyze(context.frame)
+        elif kind=='ml-insights':
+            result = MLAgent().analyze(context.frame)
+        else:
+            eda = EDAAgent().analyze(context.frame)
+            ml = MLAgent().analyze(context.frame)
+            result = dict(InsightAgent().generate_summary(eda,ml),**VisualizationAgent().suggest_charts(context.frame,eda))
+        return dict(result,dataset_id=dataset_id)
+
+    @app.post('/api/datasets/{dataset_id}/analysis/{kind}')
+    def dataset_analysis(dataset_id:int,kind:Literal['eda','ml-insights','insights']):
+        return analyze(dataset_id,kind)
+
+    @app.post('/api/eda')
+    def eda(request:Request,dataset_id:int|None=None):
+        return analyze(resolve(request,dataset_id),'eda')
+
+    @app.post('/api/ml-insights')
+    def ml(request:Request,dataset_id:int|None=None):
+        return analyze(resolve(request,dataset_id),'ml-insights')
+
+    @app.post('/api/insights')
+    def insights(request:Request,dataset_id:int|None=None):
+        return analyze(resolve(request,dataset_id),'insights')
+
+    @app.get('/api/suggested-questions')
+    def questions(request:Request,dataset_id:int|None=None,refresh:bool=False):
+        dataset_id = resolve(request,dataset_id)
+        snapshot = app.state.repository.snapshot(dataset_id)
+        result = snapshot['suggested_questions']
+        if not result or refresh:
+            result = SQLAgent().generate_suggested_questions(app.state.repository.context(dataset_id).frame)
+        return {'questions':result,'dataset_id':dataset_id}
+
+    @app.post('/api/knowledge/ask')
+    def knowledge(body:KnowledgeRequest,request:Request):
+        dataset_id = resolve(request,body.dataset_id) if body.scope=='current' else body.dataset_id
+        if dataset_id is not None:
+            app.state.repository.snapshot(dataset_id)
+        with app.state.sessions() as session:
+            return KnowledgeAgent().answer_question(body.question,current_dataset_id=dataset_id,scope=body.scope,db_session=session)
+
+    @app.get('/api/knowledge/suggested-questions')
+    def knowledge_questions(request:Request,scope:Literal['current','all_history']='current',dataset_id:int|None=None):
+        dataset_id = resolve(request,dataset_id) if scope=='current' else dataset_id
+        if dataset_id is not None:
+            app.state.repository.snapshot(dataset_id)
+        with app.state.sessions() as session:
+            return {'questions':KnowledgeAgent().get_suggested_questions(current_dataset_id=dataset_id,scope=scope,db_session=session)}
+
+    @app.get('/api/export/{dataset_id}')
+    def export(dataset_id:int,format:Literal['json','csv','html']='json'):
+        result = app.state.repository.snapshot(dataset_id)
+        if format=='csv':
+            data = app.state.repository.context(dataset_id).frame
+            for col in data:
+                data[col] = data[col].map(lambda v:"'"+v if isinstance(v,str) and v.lstrip().startswith(('=','+','-','@')) else v)
+            content,media = '\ufeff'+data.to_csv(index=False),'text/csv'
+        elif format=='html':
+            content = '<!doctype html><html><meta charset="utf-8"><title>AgentInsight report</title><style>body{font:15px system-ui;max-width:1000px;margin:40px auto}pre{white-space:pre-wrap;overflow-wrap:anywhere}@media print{button{display:none}}</style><h1>'+html.escape(result['filename'])+'</h1><button onclick="window.print()">Print / Save as PDF</button><pre>'+html.escape(json.dumps(result,indent=2,ensure_ascii=False))+'</pre></html>'
+            media = 'text/html'
+        else:
+            content,media = json.dumps(result,ensure_ascii=False),'application/json'
+        return Response(content,media_type=media,headers={'Content-Disposition':f'attachment; filename="agentinsight-{dataset_id}.{format}"'})
+
+    @app.get('/api/database/tables')
+    def source_tables():
+        import os
+        from db.source import source_tables
+        if not os.getenv('ANALYTICS_DATABASE_URL'):
+            return {'configured':False,'tables':[]}
+        try:
+            return {'configured':True,'tables':source_tables()}
+        except Exception:
+            raise DomainError(503,'SOURCE_UNAVAILABLE','Configured analytics source is unavailable.')
+
+    @app.post('/api/database/extract')
+    def extract(body:DatabaseImportRequest):
+        from db.source import extract_table
+        try:
+            return Response(extract_table(body.table).to_csv(index=False),media_type='text/csv')
+        except KeyError:
+            raise DomainError(404,'TABLE_NOT_FOUND','Source table not found.')
+        except ValueError:
+            raise DomainError(422,'INVALID_SOURCE','Source is empty, unconfigured, or exceeds import limits.')
+        except Exception:
+            raise DomainError(503,'SOURCE_UNAVAILABLE','Configured analytics source is unavailable.')
+    return app
+
+app = create_app()

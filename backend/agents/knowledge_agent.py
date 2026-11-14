@@ -10,19 +10,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 from sklearn.metrics.pairwise import cosine_similarity
 
-
-
 from db.database import SessionLocal
 
 from db.models import KnowledgeChunk, Dataset
 
-
-
 load_dotenv()
-
-
-
-
 
 class KnowledgeAgent:
 
@@ -37,8 +29,6 @@ class KnowledgeAgent:
     paired with LLM synthesis for grounded question answering.
 
     """
-
-
 
     def __init__(
 
@@ -61,8 +51,6 @@ class KnowledgeAgent:
         self.anthropic_model = anthropic_model or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 
         self.groq_model = groq_model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-
-
 
     def index_pipeline_run(
 
@@ -108,8 +96,6 @@ class KnowledgeAgent:
 
         name_str = filename or f"Dataset #{dataset_id}"
 
-
-
         # 1. Audit issues chunking
 
         flagged_issues = (audit_report or {}).get("flagged_for_review", [])
@@ -125,8 +111,6 @@ class KnowledgeAgent:
             orig_val_str = f"'{orig_val}'" if orig_val is not None else "null"
 
             reason = issue.get("reason", "Flagged during data cleaning audit")
-
-
 
             chunk_text = (
 
@@ -146,8 +130,6 @@ class KnowledgeAgent:
 
             })
 
-
-
         # 2. Executive insight summary chunking
 
         if insight_result:
@@ -157,8 +139,6 @@ class KnowledgeAgent:
             key_finding = insight_result.get("key_finding", "")
 
             recommendation = insight_result.get("recommendation", "")
-
-
 
             insight_text_parts = [f"Dataset #{dataset_id} ({name_str}) Executive Analysis:"]
 
@@ -174,8 +154,6 @@ class KnowledgeAgent:
 
                 insight_text_parts.append(f"Recommendation: {recommendation}")
 
-
-
             full_insight_text = " ".join(insight_text_parts)
 
             chunks_to_create.append({
@@ -187,8 +165,6 @@ class KnowledgeAgent:
                 "chunk_type": "insight_summary",
 
             })
-
-
 
         # Persist chunks to database
 
@@ -202,12 +178,11 @@ class KnowledgeAgent:
 
             own_session = True
 
-
-
         saved_records = []
 
         try:
 
+            session.query(KnowledgeChunk).filter(KnowledgeChunk.dataset_id==dataset_id).delete(synchronize_session=False)
             for item in chunks_to_create:
 
                 chunk_obj = KnowledgeChunk(
@@ -223,6 +198,8 @@ class KnowledgeAgent:
                 session.add(chunk_obj)
 
             session.commit()
+            from retrieval_cache import invalidate
+            invalidate()
 
             saved_records = chunks_to_create
 
@@ -230,7 +207,7 @@ class KnowledgeAgent:
 
             session.rollback()
 
-            print(f"[KnowledgeAgent] Warning: Failed to persist knowledge chunks to DB: {exc}")
+            raise RuntimeError("Knowledge indexing failed") from None
 
         finally:
 
@@ -238,11 +215,7 @@ class KnowledgeAgent:
 
                 session.close()
 
-
-
         return saved_records
-
-
 
     def answer_question(
 
@@ -294,10 +267,12 @@ class KnowledgeAgent:
 
             }
 
-
-
         own_session = False
 
+        if scope not in {'current','all_history'}:
+            raise ValueError('Invalid knowledge scope')
+        if scope=='current' and current_dataset_id is None:
+            raise ValueError('Current scope requires a dataset ID')
         session = db_session
 
         if session is None:
@@ -306,9 +281,9 @@ class KnowledgeAgent:
 
             own_session = True
 
-
-
         try:
+            if current_dataset_id is not None and session.get(Dataset,current_dataset_id) is None:
+                raise ValueError('Dataset not found')
 
             # Query chunks based on scope
 
@@ -318,11 +293,7 @@ class KnowledgeAgent:
 
                 query = query.filter(KnowledgeChunk.dataset_id == current_dataset_id)
 
-
-
             db_chunks = query.all()
-
-
 
             # If current dataset has no chunks but there are chunks overall, or if empty
 
@@ -352,19 +323,13 @@ class KnowledgeAgent:
 
                 }
 
-
-
             # Retrieve top relevant chunks using TF-IDF + Row boost
 
             retrieved_sources = self._retrieve_relevant_chunks(question, db_chunks, top_k=top_k)
 
-
-
             # Generate grounded LLM answer
 
             answer = self._generate_grounded_answer(question, retrieved_sources, scope=scope)
-
-
 
             return {
 
@@ -396,8 +361,6 @@ class KnowledgeAgent:
 
                 session.close()
 
-
-
     def _retrieve_relevant_chunks(
 
         self,
@@ -414,34 +377,18 @@ class KnowledgeAgent:
 
         corpus = [c.chunk_text for c in db_chunks]
 
-
-
         # Extract explicit row number query if present (e.g. "row 13" or "row #13")
 
         row_matches = re.findall(r"(?i)\brow\s*#?(\d+)\b", query)
 
         target_rows = set(row_matches)
 
-
-
         # Fit TF-IDF Vectorizer
 
         try:
 
-            vectorizer = TfidfVectorizer(
-
-                ngram_range=(1, 2),
-
-                stop_words="english",
-
-                lowercase=True,
-
-                max_features=2500,
-
-            )
-
-            tfidf_matrix = vectorizer.fit_transform(corpus)
-
+            from retrieval_cache import index
+            vectorizer, tfidf_matrix = index(db_chunks)
             query_vec = vectorizer.transform([query])
 
             sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
@@ -452,8 +399,6 @@ class KnowledgeAgent:
 
             sim_scores = [0.0] * len(corpus)
 
-
-
         scored_chunks = []
 
         for idx, chunk in enumerate(db_chunks):
@@ -462,19 +407,15 @@ class KnowledgeAgent:
 
             boost = 0.0
 
-
-
             # Boost if chunk contains explicitly asked row number
 
             chunk_text_lower = chunk.chunk_text.lower()
 
             for r in target_rows:
 
-                if f"row {r}" in chunk_text_lower or f"row #{r}" in chunk_text_lower:
+                if re.search(r'\brow\s*#?'+re.escape(r)+r'\b',chunk_text_lower):
 
                     boost += 2.0  # Dominant boost for exact row inquiry
-
-
 
             # Boost insight summary if user asks about summary/overview/trend
 
@@ -485,8 +426,6 @@ class KnowledgeAgent:
             ):
 
                 boost += 0.5
-
-
 
             total_score = base_score + boost
 
@@ -501,8 +440,6 @@ class KnowledgeAgent:
                 "score": total_score,
 
             })
-
-
 
         # Sort descending by total score
         scored_chunks.sort(key=lambda x: x["score"], reverse=True)
@@ -544,133 +481,9 @@ class KnowledgeAgent:
 
         return top_chunks[:min(3, len(top_chunks))]
 
-
-
     def _call_llm(self, prompt: str, system_prompt: str) -> str:
-
-        """Invokes Anthropic API if key is available, else Groq."""
-
-        # 1. Anthropic API
-
-        if self.anthropic_api_key and not self.anthropic_api_key.startswith("your_"):
-
-            try:
-
-                import anthropic
-
-                client = anthropic.Anthropic(api_key=self.anthropic_api_key)
-
-                response = client.messages.create(
-
-                    model=self.anthropic_model,
-
-                    max_tokens=800,
-
-                    system=system_prompt,
-
-                    messages=[{"role": "user", "content": prompt}],
-
-                )
-
-                if response.content and len(response.content) > 0:
-
-                    first_block = response.content[0]
-
-                    text_val = getattr(first_block, "text", None)
-
-                    if text_val is not None:
-
-                        return str(text_val).strip()
-
-            except Exception as e:
-
-                if not self.groq_api_key:
-
-                    raise RuntimeError(f"Anthropic API error: {str(e)}")
-
-
-
-        # 2. Groq fallback
-
-        groq_key = self.groq_api_key or os.getenv("GROQ_API_KEY")
-
-        if groq_key and not groq_key.startswith("your_"):
-
-            from groq import Groq
-
-            client = Groq(api_key=groq_key)
-
-
-
-            models_to_try = [
-
-                self.groq_model,
-
-                "llama-3.3-70b-versatile",
-
-                "llama-3.1-8b-instant",
-
-                "qwen/qwen3.8-27b",
-
-            ]
-
-            unique_models = []
-
-            for m in models_to_try:
-
-                if m and m not in unique_models:
-
-                    unique_models.append(m)
-
-
-
-            for model_name in unique_models:
-
-                kwargs: Dict[str, Any] = {
-
-                    "model": model_name,
-
-                    "messages": [
-
-                        {"role": "system", "content": system_prompt},
-
-                        {"role": "user", "content": prompt},
-
-                    ],
-
-                    "temperature": 0.1,
-
-                    "max_tokens": 2048,
-
-                }
-
-                if "gpt-oss" in str(model_name).lower():
-
-                    kwargs["extra_body"] = {"reasoning_effort": "low"}
-
-
-
-                try:
-
-                    response = client.chat.completions.create(**kwargs)
-
-                    if response.choices and len(response.choices) > 0:
-
-                        c_text = (response.choices[0].message.content or "").strip()
-
-                        if c_text:
-
-                            return c_text
-
-                except Exception:
-
-                    pass
-
-
-
-        raise RuntimeError("No active LLM API key available.")
-
-
+        from providers import complete
+        return complete(self, prompt, system_prompt)
 
     def _generate_grounded_answer(
 
@@ -690,8 +503,6 @@ class KnowledgeAgent:
 
             return "No relevant audit issues or insight records were found for your query."
 
-
-
         # Format context
 
         context_blocks = []
@@ -703,8 +514,6 @@ class KnowledgeAgent:
             context_blocks.append(f"[{i}] ({tag} | Dataset #{s['dataset_id']}):\n{s['text']}")
 
         context_str = "\n\n".join(context_blocks)
-
-
 
         system_prompt = (
 
@@ -732,8 +541,6 @@ class KnowledgeAgent:
 
         )
 
-
-
         user_prompt = (
 
             f"Retrieved Evidence Sources:\n"
@@ -750,8 +557,6 @@ class KnowledgeAgent:
 
         )
 
-
-
         try:
 
             return self._call_llm(user_prompt, system_prompt)
@@ -761,8 +566,6 @@ class KnowledgeAgent:
             # Deterministic fallback when LLM is offline or no API key is provided
 
             return self._deterministic_fallback_answer(question, sources)
-
-
 
     def _deterministic_fallback_answer(
 
@@ -782,19 +585,15 @@ class KnowledgeAgent:
 
             r = row_match.group(1)
 
-            matching = [s["text"] for s in sources if f"row {r}" in s["text"].lower()]
+            matching = [s["text"] for s in sources if re.search(r'\brow\s*#?'+re.escape(r)+r'\b',s['text'],re.I)]
 
             if matching:
 
                 return f"Based on the audit records: {matching[0]}"
 
-
-
         if len(sources) == 1:
 
             return f"Retrieved record: {top_source}"
-
-
 
         answer_lines = ["Based on the retrieved analysis records:"]
 
@@ -811,6 +610,10 @@ class KnowledgeAgent:
         db_session=None,
     ) -> List[str]:
         """Returns dynamic, schema- and audit-tailored suggested questions for the RAG Knowledge Agent."""
+        if scope not in {'current','all_history'}:
+            raise ValueError('Invalid knowledge scope')
+        if scope=='current' and current_dataset_id is None:
+            raise ValueError('Current scope requires a dataset ID')
         session = db_session
         own_session = False
         if session is None:
@@ -819,6 +622,8 @@ class KnowledgeAgent:
 
         questions: List[str] = []
         try:
+            if current_dataset_id is not None and session.get(Dataset,current_dataset_id) is None:
+                raise ValueError('Dataset not found')
             query = session.query(KnowledgeChunk)
             if scope == "current" and current_dataset_id is not None:
                 query = query.filter(KnowledgeChunk.dataset_id == current_dataset_id)

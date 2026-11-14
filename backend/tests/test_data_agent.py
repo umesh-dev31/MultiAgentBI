@@ -1,323 +1,88 @@
-import os
-import sys
-import tempfile
-import unittest
 import pandas as pd
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import pytest
 from agents.data_agent import DataAgent
+from agents.validation import eligible_subset
 
+def ingest(tmp_path,csv,options=None):
+    path = tmp_path/'source.csv'
+    path.write_text(csv,encoding='utf-8')
+    agent = DataAgent()
+    result = agent.process(path,options)
+    return agent.last_cleaned_df,result
 
-class TestDataAgent(unittest.TestCase):
-    def setUp(self):
-        self.agent = DataAgent()
-        self.temp_dir = tempfile.mkdtemp()
+def test_preserve_ids_signed_values_and_duplicates(tmp_path):
+    frame,result = ingest(tmp_path,'order_id,postal_code,profit\nORD-001,00123,-10\nORD-001,00123,-10\nORD-002,00500,1000\n')
+    assert frame.order_id.tolist()==['ORD-001','ORD-001','ORD-002']
+    assert frame.postal_code.tolist()==['00123','00123','00500']
+    assert frame.profit.tolist()==[-10,-10,1000]
+    assert result['summary']['duplicate_rows_dropped']==0
+    assert frame.attrs['source_rows']==[2,3,4]
 
-    def tearDown(self):
-        for f in os.listdir(self.temp_dir):
-            os.remove(os.path.join(self.temp_dir, f))
-        os.rmdir(self.temp_dir)
+def test_rupee_and_completely_failed_metric_keep_schema(tmp_path):
+    frame,result = ingest(tmp_path,'id,price,amount\n001,₹100,bad\n002,₹200,worse\n003,₹300,invalid\n')
+    assert frame.price.tolist()==[100,200,300]
+    assert frame.amount.isna().all()
+    assert next(c for c in result['columns'] if c['name']=='amount')['role']=='numeric'
+    values,population = eligible_subset(frame,['amount'])
+    assert values.empty and population['excluded_rows']==3
 
-    def test_process_csv_with_missing_and_duplicates(self):
-        # 5 rows, with 1 duplicate (Alice) and missing values (Bob salary is missing, Charlie dept is missing)
-        csv_path = os.path.join(self.temp_dir, "employees.csv")
-        csv_content = """id,name,department,salary
-1,Alice,Engineering,80000
-1,Alice,Engineering,80000
-2,Bob,Marketing,
-3,Charlie,,90000
-4,Diana,Engineering,100000
-"""
-        with open(csv_path, "w", encoding="utf-8") as f:
-            f.write(csv_content)
+def test_ambiguous_and_impossible_dates(tmp_path):
+    csv = 'id,order_date\n001,03/04/2026\n002,2026-02-30\n003,2026-04-03\n'
+    frame,result = ingest(tmp_path,csv)
+    assert pd.isna(frame.order_date[0]) and pd.isna(frame.order_date[1])
+    assert len(result['data_quality_report']['flagged_for_review'])==2
+    frame,_ = ingest(tmp_path,csv,{'date_order':'dayfirst'})
+    assert frame.order_date[0].startswith('2026-04-03')
+    frame,_ = ingest(tmp_path,csv,{'date_order':'monthfirst'})
+    assert frame.order_date[0].startswith('2026-03-04')
 
-        result = self.agent.process(csv_path)
+def test_explicit_imputation_and_deduplication_audit(tmp_path):
+    frame,result = ingest(tmp_path,'id,amount\n001,10\n001,10\n002,\n003,30\n',{'impute':True,'deduplicate':True})
+    assert frame.attrs['source_rows']==[2,4,5]
+    assert frame.amount.notna().all()
+    changes = result['data_quality_report']['changes']
+    assert any(c['row_index']==3 and 'Duplicate' in c['reason'] for c in changes)
+    assert any(c['row_index']==4 and 'imputation' in c['reason'] for c in changes)
 
-        # Verify summary
-        self.assertEqual(result["summary"]["original_rows"], 5)
-        self.assertEqual(result["summary"]["duplicate_rows_dropped"], 1)
-        self.assertEqual(result["summary"]["cleaned_rows"], 4)
-        self.assertEqual(result["summary"]["columns_count"], 4)
-        self.assertEqual(result["shape"], [4, 4])
+def test_failed_conversion_is_not_imputed(tmp_path):
+    frame,_ = ingest(tmp_path,'price\n10\nbad\n30\n',{'impute':True})
+    assert pd.isna(frame.price[1])
 
-        # Verify column metadata
-        cols = {c["name"]: c for c in result["columns"]}
-        self.assertIn("department", cols)
-        self.assertIn("salary", cols)
-        self.assertEqual(cols["department"]["missing_pct"], 25.0)
-        self.assertEqual(cols["salary"]["missing_pct"], 25.0)
+def test_missing_values_preserved(tmp_path):
+    frame,result = ingest(tmp_path,'id,amount,category\n001,10,A\n002,,\n003,30,B\n')
+    assert pd.isna(frame.amount[1]) and pd.isna(frame.category[1])
+    assert result['summary']['total_missing_values_filled']==0
 
-        # Verify cleaned preview values
-        preview = result["cleaned_preview"]
-        self.assertEqual(len(preview), 4)
+def test_explicit_constraints_and_column_role(tmp_path):
+    frame,_ = ingest(tmp_path,'reading\n-5\n0\n10\n',{'column_roles':{'reading':'numeric'},'numeric_constraints':{'reading':{'minimum':0}}})
+    values,population = eligible_subset(frame,['reading'])
+    assert values.reading.tolist()==[0,10]
+    assert population['reasons'][0]['row_index']==2
 
-        # Bob's salary should be imputed with median of [80000, 90000, 100000] = 90000
-        bob_row = next(r for r in preview if r["name"] == "Bob")
-        self.assertEqual(bob_row["salary"], 90000.0)
+def test_excel_identifiers(tmp_path):
+    path = tmp_path/'data.xlsx'
+    pd.DataFrame({'order_id':['001','ORD-002'],'price':[10,20]}).to_excel(path,index=False)
+    agent = DataAgent(); agent.process(path)
+    assert agent.last_cleaned_df.order_id.tolist()==['001','ORD-002']
 
-        # Charlie's department should be imputed with mode ("Engineering" occurs twice, Marketing once)
-        charlie_row = next(r for r in preview if r["name"] == "Charlie")
-        self.assertEqual(charlie_row["department"], "Engineering")
+def test_limits_and_invalid_options(tmp_path):
+    from config import Settings
+    path = tmp_path/'data.csv'; path.write_text('id\n1\n2\n3\n')
+    with pytest.raises(ValueError,match='limit'):
+        DataAgent().process(path,settings=Settings(max_rows=2))
+    with pytest.raises(ValueError,match='unknown'):
+        DataAgent().process(path,{'column_roles':{'missing':'numeric'}})
 
-    def test_imputation_high_cardinality_vs_repeating_category(self):
-        # customer_name has high cardinality / unique names -> fill with "Unknown"
-        # region and product are clear repeating categories -> fill with mode
-        csv_path = os.path.join(self.temp_dir, "orders.csv")
-        csv_content = """order_id,customer_name,region,product,amount
-1001,Acme Corp,North,Widget A,150
-1002,Wayne Enterprises,South,Widget B,200
-1003,Stark Industries,North,,250
-1004,,North,Widget A,300
-1005,Oscorp,South,Widget A,
-"""
-        with open(csv_path, "w", encoding="utf-8") as f:
-            f.write(csv_content)
+def test_text_na_and_leading_zero_inference(tmp_path):
+    frame,_ = ingest(tmp_path,'reference,note\n001,NA\n002,NULL\n')
+    assert frame.reference.tolist()==['001','002']
+    assert frame.note.tolist()==['NA','NULL']
 
-        result = self.agent.process(csv_path)
-        preview = result["cleaned_preview"]
+def test_dedup_does_not_merge_different_parse_failures(tmp_path):
+    frame,result = ingest(tmp_path,'price\nbad\nworse\n',{'deduplicate':True})
+    assert len(frame)==2 and result['summary']['duplicate_rows_dropped']==0
 
-        # Row 1004 had missing customer_name -> should be filled with "Unknown", NOT mode!
-        row_1004 = next(r for r in preview if r["order_id"] == 1004)
-        self.assertEqual(row_1004["customer_name"], "Unknown")
-
-        # Row 1003 had missing product -> repeating category, mode is "Widget A"
-        row_1003 = next(r for r in preview if r["order_id"] == 1003)
-        self.assertEqual(row_1003["product"], "Widget A")
-
-        # Row 1005 had missing amount -> numeric median [150, 200, 250, 300] = 225.0
-        row_1005 = next(r for r in preview if r["order_id"] == 1005)
-        self.assertEqual(row_1005["amount"], 225.0)
-
-        # Check imputation strategies recorded
-        cols = {c["name"]: c for c in result["columns"]}
-        self.assertEqual(cols["customer_name"]["imputation_strategy"], "constant ('Unknown')")
-        self.assertEqual(cols["product"]["imputation_strategy"], "mode")
-        self.assertEqual(cols["amount"]["imputation_strategy"], "median")
-
-    def test_numeric_median_integer_rounding_vs_continuous(self):
-        # quantity: [2, 3, 4, 7, None] -> median is 3.5 -> should be rounded to 4
-        # unit_price: [10.5, 15.25, 20.0, 30.75, None] -> median is 17.625 -> stays decimal
-        csv_path = os.path.join(self.temp_dir, "inventory.csv")
-        csv_content = """item_id,quantity,unit_price
-1,2,10.50
-2,3,15.25
-3,4,20.00
-4,7,30.75
-5,,
-"""
-        with open(csv_path, "w", encoding="utf-8") as f:
-            f.write(csv_content)
-
-        result = self.agent.process(csv_path)
-        preview = result["cleaned_preview"]
-        item_5 = next(r for r in preview if r["item_id"] == 5)
-
-        # quantity median was 3.5 -> rounded to nearest whole number 4
-        self.assertEqual(item_5["quantity"], 4)
-        self.assertIsInstance(item_5["quantity"], int)
-
-        # unit_price median was 17.625 -> kept continuous decimal
-        self.assertEqual(item_5["unit_price"], 17.625)
-        self.assertIsInstance(item_5["unit_price"], float)
-
-        # Check inferred column dtypes
-        cols = {c["name"]: c for c in result["columns"]}
-        self.assertEqual(cols["quantity"]["dtype"], "int64")
-        self.assertEqual(cols["unit_price"]["dtype"], "float64")
-
-    def test_process_excel_file(self):
-        xlsx_path = os.path.join(self.temp_dir, "sales.xlsx")
-        df = pd.DataFrame({
-            "region": ["North", "South", "North", "North"],
-            "sales": [100.0, None, 300.0, 100.0]
-        })
-        df.to_excel(xlsx_path, index=False)
-
-        result = self.agent.process(xlsx_path)
-        # Row 0 and Row 3: ("North", 100.0) are duplicate rows
-        self.assertEqual(result["summary"]["original_rows"], 4)
-        self.assertEqual(result["summary"]["duplicate_rows_dropped"], 1)
-        self.assertEqual(result["summary"]["cleaned_rows"], 3)
-        self.assertEqual(result["shape"], [3, 2])
-
-    def test_unsupported_file_extension(self):
-        invalid_path = os.path.join(self.temp_dir, "data.txt")
-        with open(invalid_path, "w") as f:
-            f.write("test")
-        with self.assertRaises(ValueError):
-            self.agent.process(invalid_path)
-
-    def test_messy_data_quality_report(self):
-        csv_path = os.path.join(self.temp_dir, "messy_orders.csv")
-        csv_content = '''order_id,order_date,customer_name,city,region,payment_method,quantity,unit_price
-1001,2026-01-07,  Alice Smith  ,  new york  ,  north  ,credit card,2,"$60,000"
-1002,07/01/2026,Bob Jones,san francisco,NORTH,CREDIT CARD,3,"15,000"
-1003,Jan 7 2026,Charlie Brown,los angeles,south,cash,six,"$ 1,250.50"
-1004,2026-02-30,David Miller,chicago,South,Cash,-5,25.00
-1005,2026-13-01,  ,houston,west,paypal,15O00,Infinity
-1006,2026-01-10,Frank Wright,phoenix,West,PayPal,100,-10.00
-1007,2026-01-11,Grace Hopper,philadelphia,NaN,none,4,50.00
-1007,2026-01-11,Grace Hopper,philadelphia,NaN,none,4,50.00
-'''
-        with open(csv_path, "w", encoding="utf-8") as f:
-            f.write(csv_content)
-
-        result = self.agent.process(csv_path)
-
-        # Quality report structure exists
-        self.assertIn("data_quality_report", result)
-        report = result["data_quality_report"]
-        auto_fixed = report["auto_fixed"]
-        flagged = report["flagged_for_review"]
-
-        # Safe auto-fixes verified
-        self.assertGreater(auto_fixed["whitespace_trimmed"], 0)
-        self.assertGreater(auto_fixed["casing_normalized"], 0)
-        self.assertGreater(auto_fixed["currency_or_thousands_parsed"], 0)
-        self.assertGreater(auto_fixed["null_literals_converted"], 0)
-        self.assertEqual(auto_fixed["duplicate_rows_dropped"], 1)
-        self.assertGreater(auto_fixed["missing_values_imputed"], 0)
-
-        # Flagged issues verification
-        flagged_reasons = [f["reason"] for f in flagged]
-        flagged_cols = [f["column"] for f in flagged]
-
-        # Check impossible dates flagged
-        self.assertTrue(any("impossible calendar date" in r.lower() or "unparseable" in r.lower() for r in flagged_reasons))
-
-        # Check non-numeric text 'six' and '15O00' flagged in quantity
-        self.assertTrue(any("six" in str(f["original_value"]) for f in flagged))
-        self.assertTrue(any("15O00" in str(f["original_value"]) for f in flagged))
-
-        # Check negative value (-5, -10.00) flagged in quantity / unit_price
-        self.assertTrue(any("negative value" in r.lower() for r in flagged_reasons))
-
-        # Check outlier (100) flagged in quantity
-        self.assertTrue(any("outlier" in r.lower() for r in flagged_reasons))
-
-        # Check that flagged unparseable cells remain None in cleaned_preview (NOT imputed)
-        preview = result["cleaned_preview"]
-        # Row 1003 had quantity 'six' -> should be None
-        row_1003 = next(r for r in preview if r["order_id"] == 1003)
-        self.assertIsNone(row_1003["quantity"])
-
-        # Row 1005 had customer_name empty -> imputed as 'Unknown'
-        row_1005 = next(r for r in preview if r["order_id"] == 1005)
-        self.assertEqual(row_1005["customer_name"], "Unknown")
-
-        # Casing check: customer_name and city preserved, region and payment_method normalized
-        row_1001 = next(r for r in preview if r["order_id"] == 1001)
-        self.assertEqual(row_1001["customer_name"], "Alice Smith")
-        self.assertEqual(row_1001["city"], "new york")  # city casing preserved!
-        self.assertEqual(row_1001["region"], "North")   # region normalized to Title Case!
-        self.assertEqual(row_1001["payment_method"], "Credit Card")  # payment_method normalized!
-
-    def test_day_first_date_parsing(self):
-        csv_path = os.path.join(self.temp_dir, "dates.csv")
-        csv_content = """order_id,order_date
-1,05/01/2026
-2,15/01/2026
-3,11-01-2026
-4,2026-01-07
-5,Jan 7 2026
-6,2026-02-30
-"""
-        with open(csv_path, "w", encoding="utf-8") as f:
-            f.write(csv_content)
-
-        result = self.agent.process(csv_path)
-        preview = {r["order_id"]: r["order_date"] for r in result["cleaned_preview"]}
-
-        # 05/01/2026 must be January 5, 2026 (not May 1)
-        self.assertEqual(preview[1], "2026-01-05")
-
-        # 15/01/2026 must be January 15, 2026
-        self.assertEqual(preview[2], "2026-01-15")
-
-        # 11-01-2026 must be January 11, 2026 (not November 1)
-        self.assertEqual(preview[3], "2026-01-11")
-
-        # ISO 2026-01-07 preserved as January 7, 2026
-        self.assertEqual(preview[4], "2026-01-07")
-
-        # Named month Jan 7 2026 resolved to January 7, 2026
-        self.assertEqual(preview[5], "2026-01-07")
-
-        # Impossible calendar date 2026-02-30 must be None and flagged
-        self.assertIsNone(preview[6])
-        flagged = result["data_quality_report"]["flagged_for_review"]
-        self.assertTrue(any(f["column"] == "order_date" and "2026-02-30" in str(f["original_value"]) for f in flagged))
-
-    def test_data_health_score_calculation(self):
-        # 1. Clean dataset: 0 flagged, 2 auto-fixes -> 100 - (0 + 1) = 99 (Excellent)
-        clean_health = self.agent._calculate_data_health_score(
-            auto_fixed_counts={"whitespace_trimmed": 2},
-            flagged_for_review=[],
-        )
-        self.assertEqual(clean_health["score"], 99)
-        self.assertEqual(clean_health["label"], "Excellent")
-        self.assertEqual(clean_health["color"], "green")
-
-        # 2. Messy dataset: 61 auto fixes (capped at 20), 17 flagged rows (17 points) -> 100 - 37 = 63 (Good)
-        messy_flagged = [{"row_index": i, "column": "col", "reason": "err"} for i in range(17)]
-        messy_health = self.agent._calculate_data_health_score(
-            auto_fixed_counts={"whitespace_trimmed": 50, "null_literals_converted": 11},
-            flagged_for_review=messy_flagged,
-        )
-        self.assertEqual(messy_health["score"], 63)
-        self.assertEqual(messy_health["label"], "Good")
-        self.assertEqual(messy_health["color"], "amber")
-        self.assertEqual(messy_health["penalties"]["auto_fixed_penalty"], 20.0)
-        self.assertEqual(messy_health["penalties"]["flagged_penalty"], 17.0)
-
-        # 3. Very degraded dataset: 50 flagged rows (capped at 40), 60 auto-fixes (capped at 20) -> 100 - 60 = 40 (Needs Review)
-        degraded_flagged = [{"row_index": i, "column": "col", "reason": "err"} for i in range(50)]
-        degraded_health = self.agent._calculate_data_health_score(
-            auto_fixed_counts={"whitespace_trimmed": 60},
-            flagged_for_review=degraded_flagged,
-        )
-        self.assertEqual(degraded_health["score"], 40)
-        self.assertEqual(degraded_health["label"], "Needs Review")
-        self.assertEqual(degraded_health["color"], "red")
-
-    def test_exact_original_file_row_numbers_flagged(self):
-        """Verify that rows flagged for review match original spreadsheet row numbers (1-based, including header).
-        Specifically: Row 5 (array index 3) and Row 10 (array index 8) must be flagged as #5 and #10, NOT #3 and #8.
-        """
-        csv_path = os.path.join(self.temp_dir, "row_number_test.csv")
-        csv_content = """order_id,order_date,customer_name,city,region,payment_method,quantity,unit_price
-1001,2026-01-01,Alice,New York,North,Credit Card,2,50.00
-1002,2026-01-02,Bob,San Francisco,North,Credit Card,3,50.00
-1003,2026-01-03,Charlie,Los Angeles,South,Cash,4,50.00
-1004,2026-01-04,David,Chicago,South,Cash,-50,50.00
-1005,2026-01-05,Eve,Houston,West,PayPal,5,50.00
-1006,2026-01-06,Frank,Phoenix,West,PayPal,6,50.00
-1007,2026-01-07,Grace,Philadelphia,North,Credit Card,7,50.00
-1008,2026-01-08,Heidi,Dallas,South,Cash,8,50.00
-1009,2026-02-30,Ivan,Austin,South,Cash,9,50.00
-1010,2026-01-10,Judy,Seattle,West,PayPal,10,50.00
-"""
-        with open(csv_path, "w", encoding="utf-8") as f:
-            f.write(csv_content)
-
-        result = self.agent.process(csv_path)
-        flagged = result["data_quality_report"]["flagged_for_review"]
-        flagged_row_indices = [item["row_index"] for item in flagged]
-
-        # Verify exact row numbers match what a user sees in Excel/Sheets
-        self.assertIn(5, flagged_row_indices, f"Row 5 should be flagged, got {flagged_row_indices}")
-        self.assertIn(10, flagged_row_indices, f"Row 10 should be flagged, got {flagged_row_indices}")
-
-        # Ensure raw 0-based array indices (3 and 8) are NOT displayed/used
-        self.assertNotIn(3, flagged_row_indices, "Raw array index 3 was used instead of file row 5")
-        self.assertNotIn(8, flagged_row_indices, "Raw array index 8 was used instead of file row 10")
-
-        # Verify preview records carry the correct file row numbers
-        preview = result["cleaned_preview"]
-        self.assertEqual(preview[0]["_file_row_number"], 2)  # 1st data row is file row 2
-        self.assertEqual(preview[3]["_file_row_number"], 5)  # 4th data row is file row 5
-        self.assertEqual(preview[8]["_file_row_number"], 10) # 9th data row is file row 10
-
-
-if __name__ == "__main__":
-    unittest.main()
+def test_blank_rows_preserve_source_row_numbers(tmp_path):
+    frame,_ = ingest(tmp_path,'id,price\n001,10\n\n002,20\n')
+    assert frame.attrs['source_rows']==[2,3,4]
+    assert frame.id[2]=='002'

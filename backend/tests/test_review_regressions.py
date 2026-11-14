@@ -1,137 +1,142 @@
-"""Offline regression coverage for review fixes and PPT deliverables."""
 import io
-import sqlite3
-from pathlib import Path
-from unittest.mock import patch
+import json
+from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from agents.data_agent import DataAgent
-from agents.eda_agent import EDAAgent
-from agents.ml_agent import MLAgent
-from agents.sql_agent import SQLAgent
-from agents.visualization_agent import VisualizationAgent
-from agents.insight_agent import InsightAgent
-from agents.knowledge_agent import KnowledgeAgent
-from agents.validation import validated_subset
+from sqlalchemy import select
+from db.models import Job,PipelineRun,KnowledgeChunk
 
+def test_persistence_restore_and_full_exports(client,complete_job):
+    job = complete_job('id,order_date,revenue\n001,2026-01-01,10\n002,2026-02-01,20\n003,2026-03-01,30\n')
+    dataset_id = job['dataset_id']
+    restored = client.get(f'/api/history/{dataset_id}').json()
+    assert restored['eda_result']==job['result']['eda_result']
+    assert restored['policy_version']=='preserve-v1'
+    assert restored['source_rows']==[2,3,4]
+    csv = client.get(f'/api/export/{dataset_id}?format=csv')
+    values = pd.read_csv(io.StringIO(csv.text),dtype={'id':str})
+    assert values.id.tolist()==['001','002','003']
+    assert client.get(f'/api/export/{dataset_id}?format=json').json()['dataset_id']==dataset_id
+    assert 'Print / Save as PDF' in client.get(f'/api/export/{dataset_id}?format=html').text
+    with client.app.state.sessions() as session:
+        run = session.scalars(select(PipelineRun)).one()
+        assert run.validated_data is None
+        assert run.source_rows==[2,3,4]
 
-def test_source_rows_survive_duplicate_removal(tmp_path):
-    file = tmp_path / "duplicates.csv"
-    file.write_text("id,quantity,unit_price\n1,1,10\n1,1,10\n2,2,10\n3,3,10\n4,4,10\n5,5,10\n", encoding="utf-8")
-    agent = DataAgent()
-    agent.process(str(file))
-    frame = agent.last_cleaned_df
-    assert frame.attrs["source_rows"] == [2, 4, 5, 6, 7]
-    report = {"flagged_for_review": [{"row_index": 5, "reason": "outlier"}]}
-    filtered = validated_subset(frame, report)
-    assert 3 not in filtered.quantity.tolist()
-    assert filtered.attrs["source_rows"] == [2, 4, 6, 7]
+def test_explicit_dataset_isolation_and_legacy_ambiguity(client,complete_job):
+    first = complete_job('id,revenue\n001,10\n002,20\n')
+    query = client.post('/api/query',json={'question':'how many rows'})
+    assert query.status_code==200 and query.json()['row_count']==1
+    second = complete_job('id,revenue\n003,100\n004,200\n005,300\n')
+    assert client.post('/api/query',json={'question':'how many rows'}).status_code==409
+    assert client.post('/api/ml-insights').status_code==409
+    def fetch(dataset_id):
+        return client.post(f'/api/datasets/{dataset_id}/query',json={'question':'how many rows'}).json()['result'][0]['total_records']
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        counts = list(pool.map(fetch,[first['dataset_id'],second['dataset_id']]*5))
+    assert counts==[2,3]*5
+    client.get('/api/history/'+str(first['dataset_id']))
+    assert fetch(second['dataset_id'])==3
+    assert client.post('/api/query',json={'question':'how many rows','dataset_id':999999}).status_code==404
 
+def test_new_browser_has_no_implicit_latest_dataset(client,complete_job):
+    complete_job()
+    client.cookies.clear()
+    assert client.post('/api/query',json={'question':'how many rows'}).status_code==409
 
-def test_every_agent_uses_same_rows_and_keeps_zero():
-    frame = pd.DataFrame({"quantity": [0, 1, 2, 3, 4, -1], "unit_price": [10] * 6})
-    expected = validated_subset(frame)
-    for agent in [SQLAgent(), MLAgent()]:
-        assert agent._filter_validated_subset(frame).equals(expected)
-    assert VisualizationAgent()._get_validated_df(frame).equals(expected)
-    assert EDAAgent().analyze(frame)["stats_computed_on"]["validated_rows_used"] == len(expected)
-    assert expected.quantity.tolist() == [0, 1, 2, 3, 4]
-    assert validated_subset(expected).equals(expected)
+def test_history_population_and_context_are_independent_copies(client,complete_job):
+    job = complete_job()
+    repo = client.app.state.repository
+    first,second = repo.context(job['dataset_id']),repo.context(job['dataset_id'])
+    first.frame.iloc[0,1] = 999
+    assert second.frame.iloc[0,1]==10
+    assert repo.context(job['dataset_id']).frame.iloc[0,1]==10
 
+def test_persisted_numeric_values_are_not_rounded(client,complete_job):
+    job=complete_job('id,revenue\n001,1.2345678901234567\n002,2.345678901234567\n')
+    frame=client.app.state.repository.context(job['dataset_id']).frame
+    assert frame.revenue[0]==float('1.2345678901234567')
+    assert frame.revenue[1]==float('2.345678901234567')
 
-def test_forecast_accounts_for_missing_month():
-    frame = pd.DataFrame({"order_date": ["2026-01-01", "2026-03-01"], "revenue": [100, 300]})
-    forecast = MLAgent().forecast_trend(frame)["forecast"]
-    assert forecast[0]["period"] == "2026-04"
-    assert forecast[0]["predicted_value"] == pytest.approx(400)
+def test_optional_indexing_failure_keeps_saved_identity(client,configured,monkeypatch):
+    from services import execute_job
+    from agents.knowledge_agent import KnowledgeAgent
+    monkeypatch.setattr(KnowledgeAgent,'index_pipeline_run',lambda *a,**k:(_ for _ in ()).throw(RuntimeError('secret')))
+    response = client.post('/api/jobs',files={'file':('data.csv',b'id,revenue\n001,10\n002,20\n')})
+    execute_job(configured,response.json()['job_id'])
+    status = client.get(response.json()['status_url']).json()
+    assert status['state']=='completed_with_warnings'
+    assert status['dataset_id']
+    assert any(w['code']=='INDEXING_FAILED' for w in status['result']['warnings'])
+    assert client.get('/api/export/'+str(status['dataset_id'])).status_code==200
+    assert 'secret' not in json.dumps(status)
 
+def test_failed_save_is_not_success(client,configured,monkeypatch):
+    from services import execute_job
+    from repository import DatasetRepository
+    from sqlalchemy.exc import OperationalError
+    def fail(*a,**k):
+        raise OperationalError('private connection',{},Exception('password'))
+    monkeypatch.setattr(DatasetRepository,'save',fail)
+    response = client.post('/api/jobs',files={'file':('data.csv',b'revenue\n10\n20\n')})
+    execute_job(configured,response.json()['job_id'])
+    status = client.get(response.json()['status_url']).json()
+    assert status['state']=='failed' and status['error']['code']=='STORAGE_UNAVAILABLE'
+    assert client.get('/api/history').json()==[]
+    assert 'password' not in json.dumps(status)
 
-def test_sql_execution_blocks_writes_even_without_text_guard():
-    conn = sqlite3.connect(":memory:")
-    conn.execute("CREATE TABLE orders (quantity INTEGER)")
-    conn.execute("INSERT INTO orders VALUES (2)")
-    records, error = SQLAgent()._execute_sql(conn, "UPDATE orders SET quantity=99")
-    assert error and not records
-    assert conn.execute("SELECT quantity FROM orders").fetchone()[0] == 2
-    conn.close()
+def test_invalid_input_and_job_identity(client,configured):
+    from services import execute_job
+    response = client.post('/api/jobs',files={'file':('empty.csv',b'id,revenue\n')})
+    execute_job(configured,response.json()['job_id'])
+    assert client.get(response.json()['status_url']).json()['error']['code']=='INVALID_INPUT'
+    assert client.get('/api/jobs/unknown').status_code==404
+    assert client.get('/api/pipeline/status/unknown').status_code==404
+    assert client.post('/api/jobs',files={'file':('bad.txt',b'hello')}).status_code==422
+    assert client.post('/api/jobs',files={'file':('data.csv',b'id\n001')},data={'options':'invalid'}).status_code==422
 
+def test_bounded_upload_and_safe_original_storage(client,configured):
+    configured.max_upload_bytes=20
+    assert client.post('/api/jobs',files={'file':('large.csv',b'x'*21)}).status_code==413
+    assert list((configured.data_dir/'uploads').iterdir())==[]
+    response = client.post('/api/jobs',files={'file':('../../escape.csv',b'id\n001\n')})
+    assert response.status_code==202
+    files = list((configured.data_dir/'uploads').iterdir())
+    assert len(files)==1 and files[0].parent==configured.data_dir/'uploads'
+    assert files[0].read_bytes()==b'id\n001\n'
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    import main
-    import db.database
-    engine = create_engine("sqlite:///" + str(tmp_path / "history.db"), connect_args={"check_same_thread": False})
-    db.database.Base.metadata.create_all(engine)
-    sessions = sessionmaker(bind=engine)
-    monkeypatch.setattr(main, "SessionLocal", sessions)
-    monkeypatch.setattr(db.database, "SessionLocal", sessions)
-    monkeypatch.setattr(main, "init_db", lambda: None)
-    for name in ["current_cleaned_df", "current_validated_df", "current_quality_report", "current_dataset_id", "current_pipeline_result", "current_suggested_questions"]:
-        monkeypatch.setattr(main, name, None)
-    def offline(*args, **kwargs):
-        raise RuntimeError("LLM disabled in offline regression test")
-    for cls in [SQLAgent, InsightAgent, KnowledgeAgent]:
-        monkeypatch.setattr(cls, "_call_llm", offline)
-    with TestClient(main.app) as api:
-        yield api
-    engine.dispose()
+def test_knowledge_scope_and_cache_invalidation(client,complete_job):
+    from retrieval_cache import index
+    first = complete_job('id,price\n001,bad\n002,20\n')
+    second = complete_job('id,price\n003,30\n')
+    response = client.post('/api/knowledge/ask',json={'question':'Why was row 2 flagged?','dataset_id':first['dataset_id']})
+    assert response.status_code==200
+    assert response.json()['sources']
+    assert {s['dataset_id'] for s in response.json()['sources']}=={first['dataset_id']}
+    assert client.post('/api/knowledge/ask',json={'question':'hello','scope':'invalid'}).status_code==422
+    assert client.post('/api/knowledge/ask',json={'question':'hello','dataset_id':9999}).status_code==404
+    with client.app.state.sessions() as session:
+        chunks = list(session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.dataset_id==first['dataset_id'])))
+        a = index(chunks); b = index(chunks)
+        assert a[0] is b[0]
+        chunks[0].chunk_text += ' revision'
+        assert index(chunks)[0] is not a[0]
 
-
-def test_pipeline_history_exports_and_fresh_upload(client):
-    sample = Path(__file__).resolve().parents[2] / "test-data" / "forecast_ready_monthly_dataset.csv"
-    response = client.post("/api/pipeline/run?run_id=review_test", files={"file": (sample.name, sample.read_bytes(), "text/csv")})
-    assert response.status_code == 200, response.text
-    data = response.json()
-    dataset_id = data["dataset_id"]
-    assert dataset_id
-    assert len(data["execution_logs"]) == 6
-    assert data["ml_result"]["forecast"]["forecast"]
-    assert client.get("/api/history").status_code == 200
-    restored = client.get(f"/api/history/{dataset_id}").json()
-    assert restored["eda_result"] == data["eda_result"]
-    exported = client.get(f"/api/export/{dataset_id}?format=csv")
-    assert exported.status_code == 200
-    rows = pd.read_csv(io.StringIO(exported.text))
-    assert len(rows) == data["dataset_summary"]["summary"]["cleaned_rows"]
-    assert len(rows) > 10  # full data rather than preview
-    assert client.get(f"/api/export/{dataset_id}?format=json").json()["eda_result"] == data["eda_result"]
-    html = client.get(f"/api/export/{dataset_id}?format=html")
-    assert html.status_code == 200 and "Print / Save as PDF" in html.text
-    assert client.get(f"/api/export/{dataset_id}?format=bad").status_code == 422
-    assert client.post("/api/query", json={"question": "how many rows", "dataset_id": 999999}).status_code == 404
-    fresh = client.post("/api/upload", files={"file": ("new.csv", b"quantity,unit_price\n1,10\n2,10\n3,10\n", "text/csv")})
-    assert fresh.status_code == 200
-    result = client.post("/api/query", json={"question": "how many rows"}).json()
-    assert result["result"][0]["total_records"] == 3
-
-
-def test_import_database_and_unknown_table(client, tmp_path, monkeypatch):
-    source = tmp_path / "source.db"
+def test_source_import_is_read_only_and_rejects_unknown_table(client,tmp_path,monkeypatch):
+    import sqlite3
+    source = tmp_path/'source.db'
     with sqlite3.connect(source) as conn:
-        conn.execute('CREATE TABLE "sales records" (quantity INTEGER, price INTEGER)')
-        conn.executemany('INSERT INTO "sales records" VALUES (?,?)', [(1, 10), (2, 10), (3, 10)])
-    monkeypatch.setenv("ANALYTICS_DATABASE_URL", "sqlite:///" + str(source))
-    assert client.get("/api/database/tables").json()["tables"] == ["sales records"]
-    imported = client.post("/api/database/extract", json={"table": "sales records"})
-    assert imported.status_code == 200 and len(pd.read_csv(io.StringIO(imported.text))) == 3
-    assert client.post("/api/database/extract", json={"table": "sales records; DROP TABLE sales records"}).status_code == 404
-    response = client.post("/api/pipeline/run", files={"file": ("source.csv", imported.content, "text/csv")})
-    assert response.status_code == 200, response.text
-    monkeypatch.delenv("ANALYTICS_DATABASE_URL")
-    assert client.get("/api/database/tables").json() == {"configured": False, "tables": []}
+        conn.execute('CREATE TABLE sales (revenue INTEGER)')
+        conn.execute('INSERT INTO sales VALUES (123)')
+    monkeypatch.setenv('ANALYTICS_DATABASE_URL','sqlite:///'+str(source))
+    assert client.get('/api/database/tables').json()['tables']==['sales']
+    response = client.post('/api/database/extract',json={'table':'sales'})
+    assert response.status_code==200 and '123' in response.text
+    assert client.post('/api/database/extract',json={'table':'sales; DROP TABLE sales'}).status_code==404
 
-
-def test_upload_filename_cannot_escape_temp_folder(client):
-    result = client.post("/api/upload", files={"file": ("../../escape.csv", b"quantity,price\n1,10\n2,10\n3,10\n", "text/csv")})
-    assert result.status_code == 200, result.text
-
-
-def test_sql_shortcuts_do_not_ignore_aggregations_or_filters():
-    frame = pd.DataFrame({"product": ["A", "B"], "revenue": [10, 20]})
-    agent = SQLAgent()
-    assert agent._match_deterministic_query("average revenue by product", frame) is None
-    assert agent._match_deterministic_query("total revenue by product where revenue > 15", frame) is None
-    assert agent._match_deterministic_query("total revenue by product", frame)
+def test_row_number_retrieval_does_not_confuse_prefixes():
+    from agents.knowledge_agent import KnowledgeAgent
+    chunks=[KnowledgeChunk(id=1,dataset_id=1,chunk_type='audit_issue',chunk_text="Row 13, column 'price': invalid"),KnowledgeChunk(id=2,dataset_id=1,chunk_type='audit_issue',chunk_text="Row 130, column 'price': invalid")]
+    sources=KnowledgeAgent()._retrieve_relevant_chunks('why row 13?',chunks)
+    assert sources[0]['text'].startswith('Row 13,')
+    assert sources[0]['score']>sources[1]['score']

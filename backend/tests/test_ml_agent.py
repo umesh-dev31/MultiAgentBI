@@ -1,64 +1,29 @@
-import os
-import sys
-import unittest
 import pandas as pd
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import pytest
 from agents.ml_agent import MLAgent
 
+def test_anomaly_detection_sees_outliers_and_preserves_source_rows():
+    frame = pd.DataFrame({'revenue':[10,11,12,13,14,15,1000]})
+    frame.attrs['source_rows']=[2,3,5,6,8,9,12]
+    result = MLAgent().detect_anomalies(frame)
+    assert result['total_evaluated']==7
+    assert any(a['row_index']==12 for a in result['anomalies'])
 
-class TestMLAgent(unittest.TestCase):
-    def setUp(self):
-        self.agent = MLAgent()
-        self.df = pd.DataFrame({
-            "order_id": list(range(101, 116)),
-            "order_date": [
-                "2026-01-05", "2026-01-12", "2026-01-18", "2026-01-25",
-                "2026-02-02", "2026-02-10", "2026-02-16", "2026-02-22",
-                "2026-03-01", "2026-03-08", "2026-03-15", "2026-03-22",
-                "2026-03-28", "2026-03-29", "2026-03-30",
-            ],
-            "customer": ["Customer_" + str(i) for i in range(15)],
-            "product": ["Keyboard", "Mouse", "Keyboard", "Laptop", "Mouse"] * 3,
-            "quantity": [2, 1, 2, 1, 3, 2, 1, 2, 1, 2, 1, 2, 1, 25, 2],  # row 13 has 25 (spike)
-            "unit_price": [150.0, 50.0, 150.0, 1200.0, 50.0] * 3,
-        })
+def test_projection_uses_calendar_gaps_and_has_no_claimed_confidence():
+    frame = pd.DataFrame({'order_date':['2026-01-01','2026-03-01'],'revenue':[100,300]})
+    result = MLAgent().forecast_trend(frame)
+    assert result['forecast'][0]['period']=='2026-04'
+    assert result['forecast'][0]['predicted_value']==pytest.approx(400)
+    assert result['confidence_level']=='unvalidated'
 
-    def test_detect_anomalies(self):
-        result = self.agent.detect_anomalies(self.df)
-        self.assertIn("anomalies", result)
-        self.assertIn("anomaly_count", result)
-        self.assertGreater(result["total_evaluated"], 0)
-        # Check that anomalies have score, severity, and plain-English reason
-        if result["anomaly_count"] > 0:
-            first_anom = result["anomalies"][0]
-            self.assertIn("anomaly_score", first_anom)
-            self.assertIn("severity", first_anom)
-            self.assertIn("reason", first_anom)
-            self.assertIn("record", first_anom)
-            self.assertTrue(len(first_anom["reason"]) > 5)
+def test_projection_insufficient_and_signed_values():
+    assert MLAgent().forecast_trend(pd.DataFrame({'revenue':[10,20]}))['status']=='unavailable'
+    frame = pd.DataFrame({'order_date':['2026-01-01','2026-02-01'],'revenue':[-100,-200]})
+    assert MLAgent().forecast_trend(frame)['forecast'][0]['predicted_value']==pytest.approx(-300)
 
-    def test_forecast_trend(self):
-        result = self.agent.forecast_trend(self.df)
-        self.assertIn("historical", result)
-        self.assertIn("forecast", result)
-        self.assertIn("confidence_note", result)
-        self.assertEqual(len(result["historical"]), 3)  # Jan, Feb, Mar 2026
-        # Forecast should have projected 3 future periods
-        self.assertEqual(len(result["forecast"]), 3)
-        self.assertEqual(result["forecast"][0]["period"], "2026-04")
-        self.assertEqual(result["forecast"][1]["period"], "2026-05")
-        self.assertEqual(result["forecast"][2]["period"], "2026-06")
-        # Under 6 months should honestly state low confidence
-        self.assertEqual(result["confidence_level"], "low")
-        self.assertIn("limited historical data", result["confidence_note"].lower())
-
-    def test_forecast_insufficient_data(self):
-        single_month_df = self.df.iloc[:3].copy()
-        result = self.agent.forecast_trend(single_month_df)
-        self.assertEqual(result["confidence_level"], "insufficient")
-        self.assertEqual(len(result["forecast"]), 0)
-
-
-if __name__ == "__main__":
-    unittest.main()
+def test_optional_ml_failure_does_not_destroy_other_result(monkeypatch):
+    agent = MLAgent()
+    monkeypatch.setattr(agent,'detect_anomalies',lambda *a,**k: (_ for _ in ()).throw(RuntimeError()))
+    result = agent.analyze(pd.DataFrame({'order_date':['2026-01-01','2026-02-01'],'revenue':[100,200]}))
+    assert result['anomalies']['status']=='failed'
+    assert result['forecast']['status']=='completed'

@@ -16,6 +16,7 @@ class Dataset(Base):
     row_count = Column(Integer, nullable=False, default=0)
     validated_row_count = Column(Integer, nullable=False, default=0)
     flagged_count = Column(Integer, nullable=False, default=0)
+    source_path = Column(Text, nullable=True)
 
     # Relationships
     pipeline_runs = relationship("PipelineRun", back_populates="dataset", cascade="all, delete-orphan")
@@ -53,8 +54,45 @@ class PipelineRun(Base):
     execution_logs = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    policy_version = Column(String(40), nullable=False, default='legacy-v0')
+    schema_info = Column(JSON, nullable=True)
+    source_rows = Column(JSON, nullable=True)
+    cleaning_policy = Column(JSON, nullable=True)
+    eligibility = Column(JSON, nullable=True)
+    stage_statuses = Column(JSON, nullable=True)
+    warnings = Column(JSON, nullable=True)
+
     # Relationship
     dataset = relationship("Dataset", back_populates="pipeline_runs")
+
+
+class Job(Base):
+    __tablename__ = 'jobs'
+    id = Column(String(100), primary_key=True)
+    state = Column(String(40), nullable=False, default='queued', index=True)
+    mode = Column(String(20), nullable=False, default='full')
+    filename = Column(Text, nullable=False)
+    source_path = Column(Text, nullable=False)
+    options = Column(JSON, nullable=False, default=dict)
+    browser_session = Column(String(100), nullable=False)
+    dataset_id = Column(Integer, ForeignKey('datasets.id'), nullable=True)
+    stages = Column(JSON, nullable=False, default=dict)
+    error = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class BrowserDataset(Base):
+    __tablename__ = 'browser_datasets'
+    session_id = Column(String(100), primary_key=True)
+    dataset_id = Column(Integer, ForeignKey('datasets.id'), primary_key=True)
+
+
+class SchemaRevision(Base):
+    __tablename__ = 'schema_revisions'
+    version = Column(Integer, primary_key=True)
+    applied_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class AuditIssue(Base):

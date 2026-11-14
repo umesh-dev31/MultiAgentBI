@@ -60,3 +60,6 @@ tmp/
 *.db-journal
 *.db-wal
 *.db-shm
+*.db.backup-*
+*.sqlite.backup-*
+*.sqlite3.backup-*

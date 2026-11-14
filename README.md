@@ -1,5 +1,7 @@
 # AgentInsight AI — Autonomous Multi-Agent Business Intelligence Platform
 
+> Backend repair: the current backend preserves source data by default, uses explicit dataset contexts and durable supervised jobs, and supports one persistent local server. See [backend operation and API contracts](backend/README.md) for authoritative current behavior. The older feature descriptions below describe the original UI/demo; automatic imputation, deduplication and outlier exclusion are no longer defaults.
+
 **Upload a messy CSV → get instant AI-powered data cleaning, statistical analysis, interactive visualizations, executive recommendations, natural-language SQL queries, ML anomaly detection, persistent history, and RAG-powered knowledge retrieval.**
 
 </div>

@@ -60,127 +60,48 @@ class SQLAgent:
         # Remove any single-line comments (-- ...)
         lines = []
         for line in text.splitlines():
-            clean_l = re.sub(r"--.*$", "", line).strip()
+            clean_l = line.strip()
             if clean_l:
                 lines.append(clean_l)
         cleaned = " ".join(lines).strip()
         # Ensure trailing semicolon is cleaned
         return cleaned.rstrip(";")
 
-    def _validate_sql_safety(self, sql: str) -> Tuple[bool, Optional[str]]:
-        """Validates that the SQL is strictly a SELECT statement and does not include
-        forbidden modification or administrative statements.
-        """
-        if not sql:
-            return False, "Generated SQL is empty."
-
-        # Tokenize words for keyword checking
-        tokens = set(re.findall(r"\b[A-Za-z_]+\b", sql.upper()))
-
-        for kw in self.FORBIDDEN_KEYWORDS:
-            if kw in tokens:
-                return False, f"Safety violation: Forbidden SQL keyword '{kw}' detected. Only SELECT queries are permitted."
-
-        # Must begin with SELECT or WITH
-        trimmed = sql.strip().upper()
-        if not (trimmed.startswith("SELECT") or trimmed.startswith("WITH")):
-            return False, "Safety violation: Only SELECT (or CTE WITH ... SELECT) queries are allowed."
-
-        # Multiple statements separated by semicolon are dangerous
-        statements = [s.strip() for s in sql.split(";") if s.strip()]
-        if len(statements) > 1:
-            return False, "Safety violation: Multiple SQL statements detected."
-
-        return True, None
+    def _validate_sql_safety(self, sql):
+        try:
+            import sqlglot
+            from sqlglot import exp
+            statements = sqlglot.parse(sql, read='sqlite')
+            if len(statements) != 1 or not isinstance(statements[0], (exp.Select, exp.Union, exp.Intersect, exp.Except)):
+                return False, 'Only one read-only SELECT query is permitted.'
+            forbidden = (exp.Insert, exp.Update, exp.Delete, exp.Create, exp.Drop, exp.Alter, exp.Command)
+            if any(isinstance(node, forbidden) for node in statements[0].walk()):
+                return False, 'Modifying SQL is forbidden.'
+            return True, None
+        except Exception:
+            return False, 'Invalid or unsupported SQL.'
 
     def _call_llm(self, prompt: str, system_prompt: str) -> str:
-        """Calls the configured LLM (Anthropic if key exists, Groq if key exists, or fallback)."""
-        # 1. Try Anthropic if ANTHROPIC_API_KEY is available
-        if self.anthropic_api_key and not self.anthropic_api_key.startswith("your_"):
-            try:
-                import anthropic
-                client = anthropic.Anthropic(api_key=self.anthropic_api_key)
-                response = client.messages.create(
-                    model=self.anthropic_model,
-                    max_tokens=2048,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                if response.content and len(response.content) > 0:
-                    first_block = response.content[0]
-                    text_val = getattr(first_block, "text", None)
-                    if text_val is not None and str(text_val).strip():
-                        return str(text_val).strip()
-            except Exception as e:
-                # If Anthropic fails, fall through to Groq or raise
-                if not self.groq_api_key:
-                    raise RuntimeError(f"Anthropic API error: {str(e)}")
-
-        # 2. Try Groq if GROQ_API_KEY is available
-        if self.groq_api_key:
-            from groq import Groq
-            client = Groq(api_key=self.groq_api_key)
-
-            # Primary model invocation
-            kwargs: Dict[str, Any] = {
-                "model": self.groq_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.0,
-                "max_tokens": 2048,
-            }
-            if "gpt-oss" in str(self.groq_model).lower():
-                kwargs["extra_body"] = {"reasoning_effort": "low"}
-
-            try:
-                response = client.chat.completions.create(**kwargs)
-                if response.choices and len(response.choices) > 0:
-                    choice = response.choices[0]
-                    content = (choice.message.content or "").strip()
-                    if content:
-                        return content
-                    # If content is empty because reasoning consumed tokens or output went to reasoning
-                    reasoning = getattr(choice.message, "reasoning", None) or ""
-                    if reasoning:
-                        sql_m = re.search(r"(SELECT\s+[\s\S]+)", reasoning, re.IGNORECASE)
-                        if sql_m:
-                            return sql_m.group(1).strip()
-            except Exception:
-                pass
-
-            # Fallback to high-speed instruction model
-            try:
-                fb_response = client.chat.completions.create(
-                    model="qwen/qwen3.8-27b",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.0,
-                    max_tokens=2048,
-                )
-                if fb_response.choices and len(fb_response.choices) > 0:
-                    fb_content = (fb_response.choices[0].message.content or "").strip()
-                    if fb_content:
-                        return fb_content
-            except Exception as fb_err:
-                raise RuntimeError(f"Groq API error: {str(fb_err)}")
-
-        raise RuntimeError("No valid LLM API key configured (ANTHROPIC_API_KEY or GROQ_API_KEY).")
+        from providers import complete
+        return complete(self, prompt, system_prompt)
 
     def _match_deterministic_query(self, question: str, df: pd.DataFrame) -> Optional[str]:
         """Detects standard schema-agnostic or common user inquiries to generate guaranteed valid SQL."""
         q = question.strip().lower()
-        if re.search(r"\b(first|top)\s+(\d+)\s+rows?\b", q):
-            m = re.search(r"\b(first|top)\s+(\d+)\s+rows?\b", q)
-            n = m.group(2) if m else "10"
-            return f"SELECT * FROM orders LIMIT {n}"
-        if any(kw in q for kw in ["first 10", "top 10 rows", "show me 10 rows", "sample rows", "preview rows", "first 10 rows"]):
-            return "SELECT * FROM orders LIMIT 10"
-        if any(kw in q for kw in ["total number of records", "total number of rows", "total count", "how many rows", "how many records", "count of records", "row count"]):
-            return "SELECT COUNT(*) AS total_records FROM orders"
+        q = q.strip(' ?.!')
+        m = re.fullmatch(r'(?:show (?:me )?)?(?:the )?(?:first|top) (\d+) rows?', q)
+        if m:
+            return f'SELECT * FROM orders LIMIT {min(int(m[1]), 10000)}'
+        if q in {'sample rows','preview rows','show me 10 rows'}:
+            return 'SELECT * FROM orders LIMIT 10'
+        if q in {'total number of records','what is the total number of records','total number of rows','total count','how many rows','how many records','count of records','row count'}:
+            return 'SELECT COUNT(*) AS total_records FROM orders'
+        m = re.fullmatch(r'how many (?:rows|records) (?:have|where) ([a-z_]+) (>=|<=|!=|=|>|<) (-?\d+(?:\.\d+)?)', q)
+        if m:
+            col = next((c for c in df.columns if c.lower()==m[1]),None)
+            if col:
+                quoted = '"'+col.replace('"','""')+'"'
+                return f'SELECT COUNT(*) AS total_records FROM orders WHERE {quoted} {m[2]} {float(m[3])}'
         def quote(name):
             return '"' + str(name).replace('"', '""') + '"'
         columns = {str(c).lower(): c for c in df.columns}
@@ -204,216 +125,84 @@ class SQLAgent:
             return f"SELECT {quote(customer)}, COUNT(*) AS order_count FROM orders GROUP BY {quote(customer)} ORDER BY order_count DESC LIMIT {limit}"
         return None
 
-    def _execute_sql(
-        self, conn: sqlite3.Connection, sql: str
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Executes the query on the SQLite connection and returns records and error."""
+    def _execute_sql(self, conn, sql):
+        import json
+        import time
+        self._truncated = False
+        safe, error = self._validate_sql_safety(sql)
+        if not safe:
+            return [], error
+        deadline = time.monotonic()+float(os.getenv('SQL_TIMEOUT_SECONDS','2'))
+        max_rows = int(os.getenv('SQL_MAX_ROWS','10000'))
+        max_bytes = int(os.getenv('SQL_MAX_BYTES', str(5*1024*1024)))
+        allowed = {sqlite3.SQLITE_SELECT,sqlite3.SQLITE_READ,sqlite3.SQLITE_FUNCTION,sqlite3.SQLITE_RECURSIVE}
+        def authorize(action, arg1, arg2, database, trigger):
+            if action not in allowed:
+                return sqlite3.SQLITE_DENY
+            if action==sqlite3.SQLITE_READ and arg1!='orders':
+                return sqlite3.SQLITE_DENY
+            if action==sqlite3.SQLITE_FUNCTION and str(arg2).lower() in {'load_extension','readfile','writefile'}:
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
         try:
-            conn.execute("PRAGMA query_only = ON")
-            cursor = conn.cursor()
-            cursor.execute(sql)
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            rows = cursor.fetchall()
-            records = []
-            for row in rows:
-                record = {}
-                for col_name, val in zip(columns, row):
-                    # Format floats nicely if needed
-                    if isinstance(val, float):
-                        record[col_name] = round(val, 2)
-                    else:
-                        record[col_name] = val
-                records.append(record)
-            return records, None
-        except Exception as e:
-            return [], str(e)
-
-    def generate_and_run(
-        self,
-        question: str,
-        df: pd.DataFrame,
-        quality_report: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Translates a natural language question into SQL, runs it against the validated
-        in-memory database, retries once if SQL execution fails, and returns structured results.
-
-        Args:
-            question: Business question in natural language.
-            df: Cleaned pandas DataFrame.
-            quality_report: Optional DataQualityReport from DataAgent.
-
-        Returns:
-            Dict with question, generated_sql, result, row_count, error.
-        """
-        if df is None or df.empty:
-            return {
-                "question": question,
-                "generated_sql": "",
-                "result": [],
-                "row_count": 0,
-                "error": "Dataset is empty or has not been uploaded yet.",
-            }
-
-        if not question or not question.strip():
-            return {
-                "question": "",
-                "generated_sql": "",
-                "result": [],
-                "row_count": 0,
-                "error": "Question cannot be empty.",
-            }
-
-        # 1. Filter dataset to validated subset (identical to EDA Agent)
-        validated_df = self._filter_validated_subset(df, quality_report=quality_report)
-        if validated_df.empty:
-            return {
-                "question": question,
-                "generated_sql": "",
-                "result": [],
-                "row_count": 0,
-                "error": "No valid rows available after outlier and business rule filtering.",
-            }
-
-        # 2. In-memory SQLite database setup
-        conn = sqlite3.connect(":memory:")
-        try:
-            # Write validated data to table 'orders'
-            validated_df.to_sql("orders", conn, if_exists="replace", index=False)
-
-            schema_str = self._extract_schema(validated_df)
-
-            system_prompt = (
-                "You are an expert SQLite data analyst and SQL generator. "
-                "Your task is to generate a single, valid SQLite SELECT query that directly answers the user question. "
-                "CRITICAL RULES:\n"
-                "1. Generate ONLY the raw SQL query. No markdown fences, no explanatory text, no comments.\n"
-                "2. The table is named 'orders'.\n"
-                "3. Use standard SQLite syntax and functions (e.g. SUM, AVG, COUNT, ROUND, strftime for dates).\n"
-                "4. Only SELECT queries are permitted.\n"
-                "5. Ensure column names in your query match the schema exactly."
-            )
-
-            user_prompt = (
-                f"Schema:\n{schema_str}\n\n"
-                f"Question: {question.strip()}\n\n"
-                "Generate the SQLite SELECT query:"
-            )
-
-            # 3. Check deterministic shortcut or call LLM for initial SQL query
-            det_sql = self._match_deterministic_query(question, validated_df)
-            if det_sql:
-                sql = det_sql
-            else:
-                try:
-                    raw_sql = self._call_llm(user_prompt, system_prompt)
-                except Exception as llm_err:
-                    return {
-                        "question": question,
-                        "generated_sql": "",
-                        "result": [],
-                        "row_count": 0,
-                        "error": f"LLM generation failed: {str(llm_err)}",
-                    }
-
-                sql = self._clean_sql(raw_sql)
-
-            # 4. Validate SQL Safety & Retry if initial SQL is empty/unsafe
-            is_safe, safety_error = self._validate_sql_safety(sql)
-            if not is_safe:
-                # Attempt self-correction retry with high-emphasis prompt
-                retry_instruction_prompt = (
-                    f"Schema:\n{schema_str}\n\n"
-                    f"Question: {question.strip()}\n\n"
-                    "Generate a single, valid SQLite SELECT query against table 'orders' to answer the question. "
-                    "Do NOT output markdown fences, thought tags, or explanations. Start directly with SELECT or WITH."
-                )
-                try:
-                    retry_raw_sql = self._call_llm(retry_instruction_prompt, system_prompt)
-                    retry_sql = self._clean_sql(retry_raw_sql)
-                    is_safe_retry, safety_err_retry = self._validate_sql_safety(retry_sql)
-                    if is_safe_retry:
-                        sql = retry_sql
-                    else:
-                        return {
-                            "question": question,
-                            "generated_sql": retry_sql,
-                            "result": [],
-                            "row_count": 0,
-                            "error": safety_err_retry or safety_error,
-                        }
-                except Exception:
-                    return {
-                        "question": question,
-                        "generated_sql": sql,
-                        "result": [],
-                        "row_count": 0,
-                        "error": safety_error,
-                    }
-
-            # 5. Execute query on in-memory SQLite table
-            records, exec_error = self._execute_sql(conn, sql)
-
-            # 6. Retry once if execution failed (bad SQL syntax, column mismatch, etc.)
-            if exec_error is not None:
-                retry_prompt = (
-                    f"Schema:\n{schema_str}\n\n"
-                    f"Question: {question.strip()}\n\n"
-                    f"Your previous query was:\n{sql}\n\n"
-                    f"It failed to execute with this SQLite error:\n{exec_error}\n\n"
-                    "Please fix the SQL query to resolve this error. "
-                    "Output ONLY the corrected valid SQLite SELECT query, nothing else."
-                )
-
-                try:
-                    retry_raw_sql = self._call_llm(retry_prompt, system_prompt)
-                    retry_sql = self._clean_sql(retry_raw_sql)
-                    is_safe_retry, safety_err_retry = self._validate_sql_safety(retry_sql)
-                    if not is_safe_retry:
-                        return {
-                            "question": question,
-                            "generated_sql": retry_sql,
-                            "result": [],
-                            "row_count": 0,
-                            "error": safety_err_retry,
-                        }
-
-                    records_retry, exec_error_retry = self._execute_sql(conn, retry_sql)
-                    if exec_error_retry is None:
-                        return {
-                            "question": question,
-                            "generated_sql": retry_sql,
-                            "result": records_retry,
-                            "row_count": len(records_retry),
-                            "error": None,
-                        }
-                    else:
-                        # Failed twice: return clean error message instead of crashing
-                        return {
-                            "question": question,
-                            "generated_sql": retry_sql,
-                            "result": [],
-                            "row_count": 0,
-                            "error": f"Query execution failed after retry: {exec_error_retry}",
-                        }
-                except Exception as retry_err:
-                    return {
-                        "question": question,
-                        "generated_sql": sql,
-                        "result": [],
-                        "row_count": 0,
-                        "error": f"Query failed: {exec_error}. Retry attempt error: {str(retry_err)}",
-                    }
-
-            # First attempt succeeded
-            return {
-                "question": question,
-                "generated_sql": sql,
-                "result": records,
-                "row_count": len(records),
-                "error": None,
-            }
+            conn.execute('PRAGMA query_only=ON')
+            conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH,max(max_bytes,1024*1024))
+            conn.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH,100000)
+            conn.set_authorizer(authorize)
+            conn.set_progress_handler(lambda: int(time.monotonic()>deadline),1000)
+            cursor = conn.execute(sql)
+            names = [d[0] for d in cursor.description]
+            output, size = [], 2
+            while True:
+                row = cursor.fetchone()
+                if row is None:
+                    break
+                record = dict(zip(names,row))
+                size += len(json.dumps(record,ensure_ascii=False,allow_nan=False).encode('utf-8'))+2
+                if len(output)>=max_rows or size>max_bytes:
+                    self._truncated = True
+                    break
+                output.append(record)
+            return output, None
+        except Exception:
+            return [], 'SQL execution rejected, exceeded its budget, or failed.'
         finally:
-            conn.close()
+            conn.set_authorizer(None)
+            conn.set_progress_handler(None,0)
+
+    def generate_and_run(self, question, df, quality_report=None):
+        from agents.validation import eligible_subset,numeric_columns
+        population = eligible_subset(df)[1] if df is not None else {}
+        result = {'question':question,'generated_sql':'','result':[],'row_count':0,'error':None,'truncated':False,'population':population}
+        if df is None or df.empty or not question.strip():
+            return dict(result,error='A nonempty question and dataset are required.')
+        with sqlite3.connect(':memory:') as conn:
+            # SQL sees all source rows. Numeric conversion failures are SQL NULL, not deleted rows.
+            sql_frame = df.copy()
+            column_populations = {}
+            for col in numeric_columns(df):
+                eligible,column_populations[col] = eligible_subset(df,[col])
+                source = set(eligible.attrs['source_rows'])
+                sql_frame[col] = pd.to_numeric(sql_frame[col],errors='coerce').where([r in source for r in df.attrs.get('source_rows',range(2,len(df)+2))])
+            result['column_populations'] = column_populations
+            sql_frame.to_sql('orders',conn,index=False)
+            schema = self._extract_schema(df)
+            system = 'Generate one read-only SQLite SELECT query against orders. Output SQL only. Use the provided column names exactly.'
+            prompt = f'Schema:\n{schema}\nQuestion: {question}'
+            sql = self._match_deterministic_query(question,df)
+            for attempt in range(2):
+                if not sql:
+                    try:
+                        sql = self._clean_sql(self._call_llm(prompt,system))
+                    except Exception:
+                        return dict(result,error='Language provider unavailable for this question.')
+                rows,error = self._execute_sql(conn,sql)
+                if error is None:
+                    return dict(result,generated_sql=sql,result=rows,row_count=len(rows),truncated=self._truncated,error=None)
+                result.update(generated_sql=sql,error=error)
+                prompt = f'{prompt}\nCorrect this failed query: {sql}\nOnly return a read-only SELECT.'
+                sql = None
+            return result
 
     def get_default_fallback_questions(self) -> List[Dict[str, str]]:
         """Returns generic, schema-agnostic business questions when no dataset is loaded

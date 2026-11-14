@@ -1,44 +1,59 @@
-"""Shared, idempotent row validation for every analysis agent."""
-from typing import Any, Dict, Optional
+"""Eligibility per analysis, never blanket rejection of signed or unusual observations."""
 import numpy as np
 import pandas as pd
+import base64
 
-
-def validated_subset(df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
-    if df is None or df.empty:
-        return pd.DataFrame() if df is None else df.copy()
-    data = df.copy().reset_index(drop=True)
-    source_rows = list(df.attrs.get("source_rows", range(2, len(df) + 2)))
-    if len(source_rows) != len(data):
-        source_rows = list(range(2, len(data) + 2))
-    if df.attrs.get("validated"):
-        return data
-    numeric = []
-    for col in data.columns:
-        if any(k in str(col).lower() for k in ["date", "timestamp", "created_at"]):
-            continue
-        values = pd.to_numeric(data[col], errors="coerce").replace([np.inf, -np.inf], np.nan)
-        if values.notna().mean() > 0.6 or pd.api.types.is_numeric_dtype(data[col]):
-            numeric.append(col)
-            data[col] = values
-    metrics = [c for c in numeric if any(k in str(c).lower() for k in
-               ["qty", "quantity", "price", "amount", "revenue", "sales", "total", "cost", "fee"])]
-    if not metrics:
-        metrics = [c for c in numeric if str(c).lower() != "id" and not str(c).lower().endswith("_id")]
-    excluded_rows = {i.get("row_index") for i in (quality_report or {}).get("flagged_for_review", [])
-                     if "outlier" in str(i.get("reason", "")).lower()}
-    keep = pd.Series([r not in excluded_rows for r in source_rows], index=data.index)
-    for col in metrics:
-        values = data[col]
-        keep &= values.notna() & (values >= 0)
-        valid = values.dropna()
-        if len(valid) >= 4:
-            iqr = valid.quantile(0.75) - valid.quantile(0.25)
-            if iqr > 0:
-                med = valid.median()
-                keep &= values.between(med - 3 * iqr, med + 3 * iqr)
+def eligible_subset(df, columns=(), date_column=None):
+    data = df.copy()
+    source = list(df.attrs.get('source_rows', range(2,len(df)+2)))
+    keep = pd.Series(True,index=data.index)
+    reasons = []
+    reason_counts = {}
+    for col in columns:
+        values = pd.to_numeric(data[col],errors='coerce')
+        valid = values.notna() & np.isfinite(values)
+        rule = df.attrs.get('numeric_constraints',{}).get(col,{})
+        if rule.get('minimum') is not None:
+            valid &= values >= rule['minimum']
+        if rule.get('maximum') is not None:
+            valid &= values <= rule['maximum']
+        data[col] = values
+        bad = np.flatnonzero(~valid.to_numpy())
+        reason_counts[col] = len(bad)
+        for i in bad[:max(0,100-len(reasons))]:
+            reasons.append({'row_index':source[i],'column':col,'reason':'Missing, non-finite, unparseable, or outside explicit numeric constraint'})
+        keep &= valid
+    if date_column:
+        values = pd.to_datetime(data[date_column],format='mixed',errors='coerce',utc=True)
+        valid = values.notna()
+        bad = np.flatnonzero(~valid.to_numpy())
+        reason_counts[date_column] = len(bad)
+        for i in bad[:max(0,100-len(reasons))]:
+            reasons.append({'row_index':source[i],'column':date_column,'reason':'Missing, invalid, or unresolved date'})
+        keep &= valid
     result = data.loc[keep].copy().reset_index(drop=True)
-    result.attrs["source_rows"] = [r for r, include in zip(source_rows, keep) if include]
-    result.attrs["validated"] = True
-    result.attrs["original_cleaned_rows"] = len(data)
-    return result
+    result.attrs = dict(df.attrs)
+    result.attrs['source_rows'] = [r for r,k in zip(source,keep) if k]
+    return result, {'total_rows':len(df),'included_rows':len(result),'excluded_rows':len(df)-len(result),'source_rows':result.attrs['source_rows'][:100],'source_rows_truncated':len(result)>100,'eligible_mask_base64':base64.b64encode(np.packbits(keep.to_numpy(),bitorder='little').tobytes()).decode('ascii'),'mask_bitorder':'little','reasons':reasons,'reason_counts':reason_counts,'reasons_truncated':sum(reason_counts.values())>len(reasons)}
+
+def validated_subset(df, quality_report=None):
+    return pd.DataFrame() if df is None else df.copy()
+
+def numeric_columns(df):
+    schema = df.attrs.get('schema')
+    if schema:
+        return [c['name'] for c in schema if c['role']=='numeric']
+    return [c for c in df.select_dtypes(include=[np.number]).columns if not (c.lower()=='id' or c.lower().endswith('_id'))]
+
+def temporal_inputs(df):
+    schema = df.attrs.get('schema') or []
+    date = next((c['name'] for c in schema if c['role']=='date'),None)
+    if date is None:
+        date = next((c for c in df.columns if c.lower()=='date' or c.lower().endswith('_date') or c.lower() in {'timestamp','created_at'}),None)
+    numeric = numeric_columns(df)
+    def find(names):
+        return next((c for c in numeric if c.lower() in names),None)
+    amount = find({'revenue','sales','amount','total'})
+    qty,price = find({'qty','quantity'}),find({'price','unit_price'})
+    metrics = [amount] if amount else [qty,price] if qty and price else [price or qty] if price or qty else []
+    return date,metrics
