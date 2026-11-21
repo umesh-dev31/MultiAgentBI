@@ -418,7 +418,7 @@ const CARDS: CardDef[] = [
   /* ── 06 INSIGHT AGENT ─ bottom full width (3 cols) ──────────────── */
   {
     fig: 'FIG. 06',
-    tag: 'CLAUDE SYNTHESIS',
+    tag: 'GROQ SYNTHESIS',
     title: 'Insight Agent',
     metric: 'LLM-SYNTHESIZED · GROUNDED IN AGENT OUTPUTS',
     description: 'Generates an LLM-synthesized summary grounded directly in EDA and ML agent outputs, delivering actionable business takeaways without fabrication.',

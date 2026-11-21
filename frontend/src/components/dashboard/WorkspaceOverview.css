@@ -16,3 +16,5 @@
 .overview-recent li button:disabled { cursor: wait; }
 .overview-recent li span { color: var(--text-secondary); }
 .workspace-overview button:focus-visible { outline: 2px solid var(--accent-indigo); outline-offset: 3px; }
+
+.overview-tool:disabled { cursor: not-allowed; color: var(--text-muted); }

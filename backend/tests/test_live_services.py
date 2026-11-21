@@ -4,7 +4,7 @@ import pytest
 
 @pytest.mark.integration
 def test_live_language_provider():
-    if not (os.getenv('GROQ_API_KEY') or os.getenv('ANTHROPIC_API_KEY')):
+    if not os.getenv('GROQ_API_KEY'):
         pytest.skip('Configure a language provider')
     from agents.sql_agent import SQLAgent
     assert SQLAgent()._call_llm('Return SELECT 1','Return SQL only')

@@ -52,6 +52,8 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
   const [uploadFileName, setUploadFileName] = useState('')
   const [historyLoadingId, setHistoryLoadingId] = useState<number | null>(null)
   const operation = useRef<AbortController | null>(null)
+  const datasetStorageKey = 'agentinsight:active-dataset:' + session.workspace_id
+  const [restoringDataset, setRestoringDataset] = useState(true)
 
   const currentDatasetId = analysis?.dataset_id ?? null
   const activeFileName = analysis?.filename ?? ''
@@ -64,11 +66,42 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
 
   useEffect(() => () => operation.current?.abort(), [])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    let id = 0
+    try { id = Number(sessionStorage.getItem(datasetStorageKey)) } catch {}
+    Promise.resolve().then(async () => {
+      if (controller.signal.aborted) return
+      if (Number.isSafeInteger(id) && id > 0) {
+        try {
+          const saved = await requestJson<PipelineRunResponse>('/api/history/' + id, { signal: controller.signal })
+          if (!controller.signal.aborted) {
+            setAnalysis(current => current ?? { ...saved, dataset_id: saved.dataset_id ?? id })
+          }
+        } catch (error) {
+          if (!controller.signal.aborted && error instanceof ApiError && error.status === 404) {
+            try { sessionStorage.removeItem(datasetStorageKey) } catch {}
+          }
+        }
+      }
+      if (!controller.signal.aborted) setRestoringDataset(false)
+    })
+    return () => controller.abort()
+  }, [datasetStorageKey])
+
+  function rememberDataset(id: number | null | undefined) {
+    try {
+      if (id) sessionStorage.setItem(datasetStorageKey, String(id))
+      else sessionStorage.removeItem(datasetStorageKey)
+    } catch {}
+  }
+
   async function handleLogout() {
     if (signingOut) return
     setSigningOut(true)
     try {
       await logout()
+      rememberDataset(null)
       window.location.replace('/')
     } catch {
       setError('Could not log out. Please try again.')
@@ -125,6 +158,7 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
         if (status.state === 'completed' || status.state === 'completed_with_warnings') {
           if (!status.result) throw new Error('The job finished without a report. Check History.')
           setAnalysis(status.result)
+          rememberDataset(status.result.dataset_id)
           handleTabChange('quality')
           return
         }
@@ -142,7 +176,7 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
     }
   }
 
-  const handleLoadHistoricalDataset = async (datasetId: number) => {
+  const handleLoadHistoricalDataset = async (datasetId: number, destination: ActiveTab = 'quality') => {
     if (operation.current) return
     const controller = new AbortController()
     operation.current = controller
@@ -154,8 +188,9 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
       })
       if (controller.signal.aborted) return
       setAnalysis({ ...data, dataset_id: data.dataset_id ?? datasetId })
+      rememberDataset(data.dataset_id ?? datasetId)
       setJob(null)
-      handleTabChange('quality')
+      handleTabChange(destination)
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(err instanceof Error ? err.message : 'Could not load the saved report.')
@@ -221,13 +256,14 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
     operation.current?.abort()
     operation.current = null
     setAnalysis(null)
+    rememberDataset(null)
     setJob(null)
     setUploadFileName('')
     setUploading(false)
     setHistoryLoadingId(null)
     setEdaLoading(false)
     setError(null)
-    setActiveTab('upload')
+    handleTabChange('upload')
   }
 
   const hasData = datasetResult !== null
@@ -312,7 +348,7 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
                   ] as const).map(({ tab, label, color }) => (
                     <button
                       key={tab}
-                      onClick={() => setActiveTab(tab)}
+                      onClick={() => handleTabChange(tab)}
                       style={{
                         padding: '7px 14px',
                         borderRadius: 8,
@@ -363,7 +399,7 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
             cleanedPreview={datasetResult.cleaned_preview}
             report={datasetResult.data_quality_report}
             onReset={handleReset}
-            onProceed={() => setActiveTab('eda')}
+            onProceed={() => handleTabChange('eda')}
           />
         )}
 
@@ -416,7 +452,7 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn-primary" onClick={() => setActiveTab('sql')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button className="btn-primary" onClick={() => handleTabChange('sql')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 Proceed to Ask a Question
                 <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
@@ -481,7 +517,7 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
                 columns={analysis?.dataset_summary?.columns ?? []}
               />
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button className="btn-primary" onClick={() => setActiveTab('insights')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button className="btn-primary" onClick={() => handleTabChange('insights')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   Proceed to Business Summary
                   <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
@@ -537,7 +573,10 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
         )}
 
         {/* ── Empty / No data state for locked tabs ─────────────────── */}
-        {!hasData && activeTab !== 'overview' && activeTab !== 'upload' && activeTab !== 'history' && (
+        {restoringDataset && !hasData && !['overview', 'upload', 'history'].includes(activeTab) && (
+          <p role="status">Restoring your dataset…</p>
+        )}
+        {!restoringDataset && !hasData && activeTab !== 'overview' && activeTab !== 'upload' && activeTab !== 'history' && (
           <div className="empty-state">
             <div className="empty-state-icon">
               <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ margin: '0 auto', opacity: 0.4 }}>
@@ -548,7 +587,7 @@ function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backen
             <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 280 }}>
               Upload a CSV on the Upload tab or select a run from the History tab to unlock this view.
             </div>
-            <button className="btn-primary" onClick={() => setActiveTab('upload')}>
+            <button className="btn-primary" onClick={() => handleTabChange('upload')}>
               Go to Upload
             </button>
           </div>

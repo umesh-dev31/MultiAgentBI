@@ -1,20 +1,4 @@
-"""
-RAG Knowledge Agent
--------------------
-Ye agent user ke analytical aur meta-questions ke answers deta hai:
-Example:
-- "Why was row 22 flagged?"
-- "What data quality issues were found?"
-- "How does this compare to past uploads?"
-
-Architecture:
-1. Indexing: Pipeline run ke baad audit issues aur executive summaries ko chunks bana kar SQLite database me store karta hai.
-2. Retrieval: Scikit-learn TF-IDF Vectorizer + Cosine Similarity se user ke question se match hone wale top chunks dhoondta hai.
-   Agar question me specific row number ho (e.g. 'row 22'), to exact row mention ko dominant score boost (+2.0) deta hai.
-   Same row ke multiple chunks ko merge/deduplicate karta hai taaki duplicate issues UI me clutter na karein.
-3. Grounded Synthesis: LLM ko strictly retrieved context dekar grounded answer generate karwata hai with source citations.
-   Offline / No API key hone par deterministic rule-based answer banata hai.
-"""
+"""Index audit issues and executive summaries, rank chunks with TF-IDF and cosine similarity, and ground answers in retrieved evidence. Boost exact row matches, consolidate issues for the same row, and use a deterministic fallback when the provider is unavailable."""
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -29,14 +13,10 @@ load_dotenv()
 class KnowledgeAgent:
     def __init__(
         self,
-        anthropic_api_key: Optional[str] = None,
         groq_api_key: Optional[str] = None,
-        anthropic_model: Optional[str] = None,
         groq_model: Optional[str] = None,
     ):
-        self.anthropic_api_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
         self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY")
-        self.anthropic_model = anthropic_model or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
         self.groq_model = groq_model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
     def index_pipeline_run(
@@ -47,16 +27,12 @@ class KnowledgeAgent:
         filename: Optional[str] = None,
         db_session=None,
     ) -> List[Dict[str, Any]]:
-        """
-        Completed pipeline run ke data ko chunks me divide karke DB me persist karta hai:
-        1. Flagged audit issues (row number, column, original value, reason)
-        2. Executive summary findings and recommendations
-        """
+        """Turn the completed run into audit and insight chunks and save them to the database."""
         chunks_to_create = []
         name_str = filename or f"Dataset #{dataset_id}"
 
         # -------------------------------------------------------------
-        # 1. Audit issues chunking: Har flagged error ka concise text chunk banao
+        # Create concise chunks from flagged audit issues.
         # -------------------------------------------------------------
         flagged_issues = (audit_report or {}).get("flagged_for_review", [])
         for issue in flagged_issues:
@@ -77,7 +53,7 @@ class KnowledgeAgent:
             })
 
         # -------------------------------------------------------------
-        # 2. Executive insight summary chunking: Key findings ko chunk me add karo
+        # Add key findings to the executive insight chunk.
         # -------------------------------------------------------------
         if insight_result:
             summary = insight_result.get("summary", "")
@@ -100,7 +76,7 @@ class KnowledgeAgent:
             })
 
         # -------------------------------------------------------------
-        # 3. Database me batch save karo
+        # Save the chunks to the database in a batch.
         # -------------------------------------------------------------
         session = db_session
         own_session = False
@@ -154,12 +130,7 @@ class KnowledgeAgent:
         *,
         workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Main Q&A function:
-        1. Scope check (Sirf current dataset ya Saare historical uploads)
-        2. TF-IDF retrieval se top relevant chunks dhoondna
-        3. LLM synthesis se grounded response return karna
-        """
+        """Retrieve relevant chunks in the requested scope and generate an answer with sources."""
         if not question or not question.strip():
             return {
                 "answer": "Please ask a specific question about the dataset analysis or audit findings.",
@@ -224,20 +195,14 @@ class KnowledgeAgent:
         db_chunks: List[KnowledgeChunk],
         top_k: int = 5,
     ) -> List[Dict[str, Any]]:
-        """
-        TF-IDF vector space model se cosine similarity calculate karta hai.
-        Smart Boosts:
-        - Exact row number match (e.g. 'row 13'): +2.0 boost
-        - Executive summary match (e.g. 'summary', 'recommendation'): +0.5 boost
-        - Same row deduplication: Row 22 ke multiple column issues ko ek single chunk me combine karta hai
-        """
+        """Rank chunks by cosine similarity, boost exact row matches, and consolidate issues for the same row."""
         corpus = [c.chunk_text for c in db_chunks]
 
-        # User question me koi specific row number pucha gaya hai kya? (e.g. 'row 22')
+        # Check whether the question mentions a specific row.
         row_matches = re.findall(r"(?i)\brow\s*#?(\d+)\b", query)
         target_rows = set(row_matches)
 
-        # TF-IDF similarity calculate karo
+        # Calculate TF-IDF similarity.
         try:
             from retrieval_cache import index
             vectorizer, tfidf_matrix = index(db_chunks)
@@ -271,11 +236,11 @@ class KnowledgeAgent:
                 "score": total_score,
             })
 
-        # Highest score pehle sort karo
+        # Sort the highest scores first.
         scored_chunks.sort(key=lambda x: x["score"], reverse=True)
 
         # -------------------------------------------------------------
-        # Deduplication: Ek hi row ke alag-alag columns ko ek chunk me merge karo
+        # Combine issues for different columns on the same row.
         # (e.g. Row 22 unit_price + Row 22 total_amount -> ek combined clear entry)
         # -------------------------------------------------------------
         merged = []
@@ -305,7 +270,7 @@ class KnowledgeAgent:
         return top_chunks[:min(3, len(top_chunks))]
 
     def _call_llm(self, prompt: str, system_prompt: str) -> str:
-        """Unified providers module ke zariye AI call karta hai."""
+        """Call the language model through the shared provider interface."""
         from providers import complete
         return complete(self, prompt, system_prompt)
 
@@ -315,10 +280,7 @@ class KnowledgeAgent:
         sources: List[Dict[str, Any]],
         scope: str = "current",
     ) -> str:
-        """
-        Retrieved context sources se LLM answer banwata hai.
-        Strict grounding rules lagata hai taaki AI hallucinate na kare.
-        """
+        """Generate an answer grounded in the retrieved sources."""
         if not sources:
             return "No relevant audit issues or insight records were found for your query."
 
@@ -353,13 +315,13 @@ class KnowledgeAgent:
         try:
             return self._call_llm(user_prompt, system_prompt)
         except Exception:
-            # Fallback agar LLM offline ho
+            # Use the deterministic fallback if the language model is unavailable.
             return self._deterministic_fallback_answer(question, sources)
 
     def _deterministic_fallback_answer(
         self, question: str, sources: List[Dict[str, Any]]
     ) -> str:
-        """Offline hone par sources me se direct factual line extract karta hai."""
+        """Extract factual lines from the retrieved sources for the offline fallback."""
         top_source = sources[0]["text"]
         row_match = re.search(r"(?i)\brow\s*#?(\d+)\b", question)
         if row_match:
@@ -384,10 +346,7 @@ class KnowledgeAgent:
         *,
         workspace_id: Optional[str] = None,
     ) -> List[str]:
-        """
-        Indexed audit chunks ko dekh kar UI ke liye dynamic suggested demo questions banata hai.
-        Example: Agar Row 22 flag hui hai, to 'Why was row 22 flagged?' suggest karta hai.
-        """
+        """Suggest questions based on indexed audit chunks, such as asking why a particular row was flagged."""
         if scope not in {'current', 'all_history'}:
             raise ValueError('Invalid knowledge scope')
         if scope == 'current' and current_dataset_id is None:

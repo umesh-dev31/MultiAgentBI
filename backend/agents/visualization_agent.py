@@ -1,28 +1,19 @@
-"""
-Visualization Agent
--------------------
-Ye agent dataset aur EDA results ke hisaab se sabse useful charts recommend karta hai:
-1. Line Chart: Monthly revenue / order trends dikhane ke liye.
-2. Bar Chart: Category vs Metric (e.g. Sales by Product Category, top 8).
-3. Pie Chart: Categorical proportions (e.g. Payment Method breakdown).
-"""
+"""Recommend charts based on dataset types and EDA results, including trends and category comparisons."""
 from agents.validation import eligible_subset, temporal_inputs, validated_subset
 
 class VisualizationAgent:
     def _get_validated_df(self, df, quality_report=None):
-        """Safe DataFrame copy return karta hai."""
+        """Return a safe copy of the DataFrame."""
         return validated_subset(df)
 
     def suggest_charts(self, df, eda_result=None, quality_report=None):
-        """
-        Dataset ke data types aur EDA results ko dekh kar top 3 best charts suggest karta hai.
-        """
+        """Suggest up to three charts based on the data types and EDA results."""
         eda = eda_result or {}
         charts, populations = [], {}
 
         # -------------------------------------------------------------
         # 1. Line Chart (Monthly Trend)
-        # Agar dataset me dates hain, to time-series line chart sabse best hota hai
+        # Suggest a time-series line chart when the dataset has dates.
         # -------------------------------------------------------------
         if eda.get('monthly_trend'):
             charts.append({
@@ -35,7 +26,7 @@ class VisualizationAgent:
             })
             populations['temporal'] = eda.get('populations', {}).get('temporal', {})
 
-        # Categorical columns pehchano (IDs ko skip karte hain)
+        # Identify categorical columns and skip identifiers.
         schema = df.attrs.get('schema', [])
         categories = (
             [c['name'] for c in schema if c['role'] == 'text']
@@ -46,7 +37,7 @@ class VisualizationAgent:
 
         # -------------------------------------------------------------
         # 2. Bar Chart (Category vs Revenue/Metric)
-        # Top 8 categories ka comparison bar chart me dikhate hain
+        # Compare the eight most frequent categories in a bar chart.
         # -------------------------------------------------------------
         if categories and metrics:
             values, populations['category_metric'] = eligible_subset(df, metrics)
@@ -67,7 +58,7 @@ class VisualizationAgent:
 
         # -------------------------------------------------------------
         # 3. Pie/Doughnut Chart (Categorical Distribution)
-        # Category ki distribution / percentage share dikhane ke liye
+        # Show category distribution or percentage share.
         # -------------------------------------------------------------
         if categories:
             category = categories[0]
@@ -81,5 +72,5 @@ class VisualizationAgent:
                     'data': data
                 })
 
-        # UI ko max 3 best charts return karo
+        # Return up to three chart suggestions.
         return {'charts': charts[:3], 'populations': populations}

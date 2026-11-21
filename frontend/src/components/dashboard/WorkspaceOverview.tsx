@@ -18,7 +18,7 @@ export function WorkspaceOverview({ username, activeFile, onNavigate, onLoad, lo
   username: string
   activeFile?: string
   onNavigate: (tab: Tool | 'history') => void
-  onLoad: (id: number) => Promise<void>
+  onLoad: (id: number, destination?: Tool) => Promise<void>
   loadingId: number | null
 }) {
   const [recent, setRecent] = useState<HistoryItem[] | null>(null)
@@ -60,9 +60,15 @@ export function WorkspaceOverview({ username, activeFile, onNavigate, onLoad, lo
 
       <section aria-labelledby="overview-tools">
         <h2 id="overview-tools">Workspace tools</h2>
+        {!activeFile && !latest && <p>Upload a dataset to unlock the analysis tools.</p>}
         <div className="overview-tools">
           {tools.map(([tab, label, description]) => (
-            <button className="overview-panel overview-tool" key={tab} onClick={() => onNavigate(tab)}>
+            <button className="overview-panel overview-tool" key={tab}
+              disabled={tab !== 'upload' && (loadingId !== null || (!activeFile && !latest))}
+              onClick={() => {
+                if (tab === 'upload' || activeFile) onNavigate(tab)
+                else if (latest) void onLoad(latest.id, tab)
+              }}>
               <span><strong>{label}</strong><span>{description}</span></span>
               <span aria-hidden="true">→</span>
             </button>

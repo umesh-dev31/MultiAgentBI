@@ -131,7 +131,7 @@ export const BusinessSummaryView = ({
             Synthesizing Business Insights & Visualizations...
           </h4>
           <p className="text-xs text-slate-500 max-w-md">
-            The Visualization Agent is identifying optimal chart specs, while the Insight Agent evaluates statistical patterns and machine learning anomalies with Claude.
+            The Visualization Agent is identifying optimal chart specs, while the Insight Agent evaluates statistical patterns and machine learning anomalies with Groq.
           </p>
         </div>
       )}

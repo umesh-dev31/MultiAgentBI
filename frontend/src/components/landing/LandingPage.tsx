@@ -132,7 +132,7 @@ const TECH_STACK = [
   { name: 'LangGraph', role: 'State graph orchestration', badge: 'DAG' },
   { name: 'FastAPI', role: 'High-throughput async backend', badge: 'API' },
   { name: 'IsolationForest', role: 'Unsupervised outlier detection', badge: 'ML' },
-  { name: 'Anthropic Claude', role: 'Executive synthesis LLM', badge: 'GEN-AI' },
+  { name: 'Groq', role: 'Executive synthesis LLM', badge: 'GEN-AI' },
   { name: 'SQLite', role: 'In-process isolated query engine', badge: 'SQL' },
   { name: 'React 19', role: 'Concurrent UI runtime', badge: 'UI' },
   { name: 'Recharts', role: 'Vector SVG visualization layer', badge: 'VIZ' },
@@ -395,7 +395,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <p className={`mt-6 text-[12px] font-mono tracking-wider ${
           isDark ? 'text-white/50' : 'text-neutral-500'
         }`}>
-          FASTAPI · LANGGRAPH · ANTHROPIC CLAUDE · RECHARTS · SQLITE
+          FASTAPI · LANGGRAPH · GROQ · RECHARTS · SQLITE
         </p>
 
         {/* Active session reminder */}
@@ -613,7 +613,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             >
               GitHub Source →
             </a>
-            <span>FastAPI · LangGraph · React 19 · Claude 3.5</span>
+            <span>FastAPI · LangGraph · React 19 · Groq</span>
           </div>
         </div>
       </footer>

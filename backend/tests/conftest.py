@@ -19,7 +19,6 @@ def offline(monkeypatch,request):
         return
     monkeypatch.setenv('PYTHON_DOTENV_DISABLED','1')
     monkeypatch.delenv('GROQ_API_KEY',raising=False)
-    monkeypatch.delenv('ANTHROPIC_API_KEY',raising=False)
     monkeypatch.delenv('LANGSMITH_API_KEY',raising=False)
     monkeypatch.setenv('LANGCHAIN_TRACING_V2','false')
 

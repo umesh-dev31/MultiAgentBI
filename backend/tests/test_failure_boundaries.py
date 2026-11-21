@@ -58,6 +58,6 @@ def test_provider_timeout_and_retry_configuration(monkeypatch):
             options.update(kwargs)
             self.chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **k:SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='SELECT 1'))])))
     monkeypatch.setitem(sys.modules,'groq',SimpleNamespace(Groq=Client))
-    owner=SimpleNamespace(anthropic_api_key=None,groq_api_key='test-key',groq_model='test-model')
+    owner=SimpleNamespace(groq_api_key='test-key',groq_model='test-model')
     assert complete(owner,'prompt','system')=='SELECT 1'
     assert options['timeout']==20 and options['max_retries']==1

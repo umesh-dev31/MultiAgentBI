@@ -1,14 +1,4 @@
-"""
-Data Agent
-----------
-Ye agent raw CSV / Excel files ko ingest, audit aur clean karta hai.
-
-Key principles:
-1. Data Preservation: Koi bhi data silently delete nahi hota.
-2. Identifiers Protection: IDs (jaise 'ORD-001', 'SKU-99') ko string rakhte hain, number me convert karke NaN nahi banate.
-3. Multi-currency Support: Currency symbols ($, €, £, ¥, ₹) clean karke pure numbers nikaalta hai.
-4. Complete Audit Trail: Har row me jo bhi issue ya change hua, uska row number aur reason record hota hai.
-"""
+"""Ingest and audit CSV or Excel files. Preserve rows and identifier strings, parse currency values, and record changes with source row numbers."""
 import re
 import csv
 import zipfile
@@ -18,7 +8,7 @@ import pandas as pd
 from contracts import ImportOptions, POLICY_VERSION, records
 from config import Settings
 
-# Regex: Identifier columns pehchanne ke liye (e.g. order_id, user_uuid, zip_code)
+# Match identifier columns such as order_id, user_uuid, and zip_code.
 IDENTIFIER = re.compile(r'^(id|uuid|guid|sku|zip|zipcode|postal_code|phone|.*_id|.*_code)$', re.I)
 
 # Common numeric column names
@@ -28,18 +18,14 @@ NUMERIC_NAMES = {
     'age', 'count', 'balance', 'fee', 'temperature', 'profit'
 }
 
-# Regex: Date columns pehchanne ke liye
+# Match date column names.
 DATE_NAME = re.compile(r'(^date$|_date$|^timestamp$|_at$|^datetime$)', re.I)
 
 def number(value):
-    """
-    Currency symbols (₹, $, €, etc.), commas aur spaces ko hata kar
-    string ko clean float number me convert karta hai.
-    Agar convert na ho sake (invalid text), to np.nan return karta hai.
-    """
+    """Strip currency symbols, commas, and spaces before parsing a float. Return NaN for invalid values."""
     if value is None or pd.isna(value):
         return np.nan
-    # Currency symbols aur unwanted spaces strip karo
+    # Strip currency symbols, commas, and whitespace.
     text = re.sub(r'[$€£¥₹\s,]', '', str(value))
     try:
         parsed = float(text)
@@ -71,7 +57,7 @@ class DataAgent:
         if path.stat().st_size > settings.max_upload_bytes:
             raise ValueError('Upload exceeds byte limit')
 
-        # CSV Read: UTF-8 BOM handle karta hai aur blank lines preserve karta hai
+        # Handle the UTF-8 BOM and preserve blank CSV lines.
         if path.suffix.lower() == '.csv':
             with path.open(encoding='utf-8-sig', newline='') as stream:
                 if len(next(csv.reader(stream), [])) > settings.max_columns:
@@ -98,7 +84,7 @@ class DataAgent:
 
         # -------------------------------------------------------------
         # Step 2: Setup tracking & original row indices
-        # CSV me headers line 1 par hoti hain, so data row 2 se shuru hoti hai
+        # Data starts on line 2 because the header occupies line 1.
         # -------------------------------------------------------------
         source = list(range(2, len(frame) + 2))
         raw_duplicates = frame.duplicated()
@@ -110,7 +96,7 @@ class DataAgent:
         ], 0)
 
         def audit(i, col, raw, reason, change=False):
-            """Audit log helper: Har issue ya transformation ka record rakhta hai."""
+            """Record a data issue or transformation in the audit log."""
             (changes if change else issues).append({
                 'row_index': source[i],
                 'column': col,
@@ -125,7 +111,7 @@ class DataAgent:
             raw_values = frame[col].tolist()
             nonempty = frame[col][frame[col] != '']
 
-            # Column role detect karo: identifier, date, numeric, ya text
+            # Identify the column role: identifier, date, numeric, or text.
             role = options.column_roles.get(col)
             if role is None:
                 if IDENTIFIER.fullmatch(col):
@@ -134,7 +120,7 @@ class DataAgent:
                     role = 'date'
                 elif col.lower() in NUMERIC_NAMES:
                     role = 'numeric'
-                # Leading zeros wale numbers (e.g. '0123') postal codes ho sakte hain, unhe text rehne do
+                # Keep values with leading zeros as text because they may be postal codes.
                 elif len(nonempty) and nonempty.map(number).notna().all() and not nonempty.str.match(r'^[+-]?0\d').any():
                     role = 'numeric'
                 else:
@@ -143,11 +129,11 @@ class DataAgent:
             parsed = []
             invalid_indices = set()
 
-            # Har cell ki value parse karo aur issues flag karo
+            # Parse each cell and flag issues.
             for i, raw in enumerate(raw_values):
                 value = raw if raw != '' else None
 
-                # Numeric handling: currency strip karo aur float banao
+                # Strip currency formatting before parsing numeric values.
                 if role == 'numeric':
                     value = number(value)
                     if pd.isna(value):
@@ -158,7 +144,7 @@ class DataAgent:
                         audit(i, col, raw, 'Parsed numeric representation', True)
                         fixed['currency_or_thousands_parsed'] += 1
 
-                # Date handling: Ambiguous dates (e.g. 05/06/2024) detect karo aur standard ISO format me lao
+                # Detect ambiguous dates and normalize unambiguous dates to ISO format.
                 elif role == 'date' and value is not None:
                     try:
                         match = re.fullmatch(r'(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})', value)
@@ -177,7 +163,7 @@ class DataAgent:
             if role == 'numeric':
                 frame[col] = pd.to_numeric(frame[col], errors='coerce')
 
-            # Numeric Constraints check (user ne koi min ya max diya ho to)
+            # Apply user-defined minimum and maximum constraints.
             constraint = options.numeric_constraints.get(col)
             if constraint and role != 'numeric':
                 raise ValueError('Numeric constraints require a numeric role')
@@ -191,7 +177,7 @@ class DataAgent:
                     ):
                         audit(i, col, raw_values[i], 'Outside explicit numeric constraint')
 
-            # Optional Imputation: Missing values fill karo (agar user ne request kiya ho)
+            # Fill missing values when imputation is requested.
             if options.impute and role not in {'identifier', 'date'}:
                 missing = frame[col].isna()
                 fill = frame[col].median() if role == 'numeric' else (frame[col].mode().iloc[0] if not frame[col].mode().empty else None)
@@ -223,7 +209,7 @@ class DataAgent:
             frame = frame.loc[~duplicates].reset_index(drop=True)
             fixed['duplicate_rows_dropped'] = int(duplicates.sum())
 
-        # Metadata attach karo
+        # Attach metadata.
         frame.attrs = {
             'source_rows': source,
             'schema': schema,
@@ -232,7 +218,7 @@ class DataAgent:
         }
         self.last_cleaned_df = frame
 
-        # Health score nikaalo (100 me se penalties minus hoti hain)
+        # Subtract penalties from 100 to calculate the health score.
         health = self._calculate_data_health_score(fixed, issues)
         report = {
             'auto_fixed': fixed,
@@ -262,11 +248,7 @@ class DataAgent:
         }
 
     def _calculate_data_health_score(self, fixed, issues):
-        """
-        Data Health Score (0 - 100):
-        Flagged rows ke hisaab se max 40 points penalty lagti hai.
-        >80: Excellent (Green), >=60: Good (Amber), <60: Needs Review (Red).
-        """
+        """Calculate the health score by applying penalties for flagged rows."""
         flagged = len({i['row_index'] for i in issues})
         penalty = min(40, flagged)
         score = 100 - penalty

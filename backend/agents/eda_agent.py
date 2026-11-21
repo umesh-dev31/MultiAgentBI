@@ -1,27 +1,16 @@
-"""
-EDA (Exploratory Data Analysis) Agent
--------------------------------------
-Ye agent dataset ke statistics analyze karta hai:
-1. Numeric stats (mean, std, median, min, max, quartiles)
-2. Categorical distribution (top 5 distinct values & counts)
-3. Correlation matrix (features ke beech correlation)
-4. Monthly time-series trends (revenue & orders per month)
-"""
+"""Summarize numeric and categorical columns, correlations, and monthly trends."""
 import pandas as pd
 from contracts import finite_result
 from agents.validation import eligible_subset, numeric_columns, temporal_inputs
 
 class EDAAgent:
     def analyze(self, df, quality_report=None):
-        """
-        Poore dataset ka statistical summary banata hai.
-        Har metric ke liye sirf eligible rows use karta hai taaki accurate stats milein.
-        """
+        """Use the eligible rows for each metric to calculate dataset statistics."""
         numeric = numeric_columns(df)
         stats, populations = {}, {}
 
         # -------------------------------------------------------------
-        # 1. Numeric Summary: Har number column ke stats nikaalo
+        # Summarize each numeric column.
         # (count, mean, standard deviation, median, min, max, Q1, Q3)
         # -------------------------------------------------------------
         for col in numeric:
@@ -41,8 +30,8 @@ class EDAAgent:
                 }
 
         # -------------------------------------------------------------
-        # 2. Categorical Summary: Text columns ke top-5 values aur percentages
-        # (e.g. Kaunsa payment method ya category sabse zyada use hui)
+        # Report the five most frequent category values and their percentages.
+        # (e.g. which payment methods are most common, which product categories are most popular)
         # -------------------------------------------------------------
         categories = {}
         date, metrics = temporal_inputs(df)
@@ -61,8 +50,8 @@ class EDAAgent:
             ]
 
         # -------------------------------------------------------------
-        # 3. Correlation Matrix: Numeric columns ek-doosre se kitne judey hain
-        # (-1 to +1 range me relation dikhata hai)
+        # Measure correlations between numeric columns.
+        # Correlation values range from -1 to +1.
         # -------------------------------------------------------------
         corr = {'columns': [], 'matrix': []}
         if len(numeric) > 1:
@@ -72,14 +61,14 @@ class EDAAgent:
                 corr = {'columns': numeric, 'matrix': matrix.values.tolist()}
 
         # -------------------------------------------------------------
-        # 4. Monthly Trend: Mahine-ke-hisaab se orders aur revenue aggregate karo
+        # Aggregate orders and revenue by month.
         # -------------------------------------------------------------
         trends = []
         if date:
             values, populations['temporal'] = eligible_subset(df, metrics, date)
             if len(values):
                 values['_month'] = pd.to_datetime(values[date], format='mixed', utc=True).dt.strftime('%Y-%m')
-                # Agar quantity aur unit_price dono hain to multiply karke revenue nikalo
+                # Calculate revenue from quantity and unit price when both are available.
                 values['_metric'] = (
                     values[metrics[0]] * values[metrics[1]]
                     if len(metrics) == 2
@@ -102,7 +91,7 @@ class EDAAgent:
             peak = max(trends, key=lambda t: t['total_revenue'])
             patterns.append(f"Peak observed monthly metric: {peak['month']} ({peak['total_revenue']:,.2f}).")
 
-        # JSON-safe finite result return karo (NaN/Inf values handled)
+        # Return JSON-safe results with nonfinite values handled.
         return finite_result({
             'stats_computed_on': {'total_rows': len(df), 'validated_rows_used': len(df), 'excluded_rows': 0},
             'numeric_summary': stats,

@@ -1,10 +1,4 @@
-"""
-ML (Machine Learning) Agent
----------------------------
-Ye agent 2 important kaam karta hai:
-1. Anomaly Detection: Isolation Forest algorithm se unusual/outlier records detect karta hai.
-2. Trend Forecasting: Polynomial regression se aage aane wale 3 mahino ka revenue/orders predict karta hai.
-"""
+"""Detect unusual records with Isolation Forest and forecast revenue and orders with a linear trend."""
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
@@ -13,15 +7,11 @@ from contracts import records, finite_result
 
 class MLAgent:
     def _filter_validated_subset(self, df, quality_report=None):
-        """Dataset ki safe copy return karta hai."""
+        """Return a safe copy of the dataset."""
         return validated_subset(df)
 
     def detect_anomalies(self, df, quality_report=None):
-        """
-        Anomaly Detection using Isolation Forest:
-        - Outliers ko data se delete NAHI karta, sirf FLAG karta hai.
-        - Category-relative scaling use hoti hai (jaise electronics vs groceries ka price alag scale pe hota hai).
-        """
+        """Flag outliers without removing rows. Use category-relative scaling when categories are available."""
         features = numeric_columns(df)
         values, population = eligible_subset(df, features)
         output = {
@@ -32,25 +22,25 @@ class MLAgent:
             'population': population
         }
 
-        # Kam se kam 5 observations aur 1 numeric feature hona zaroori hai
+        # Require at least five observations and one numeric feature.
         if not features or len(values) < 5:
             return dict(output, note='At least five eligible observations and one numeric feature are required.', status='unavailable')
 
         matrix = values[features].copy()
         category = next((c for c in values if c.lower() in {'product', 'category', 'item'}), None)
 
-        # Baseline nikaalo: Category-wise median agar category column mile, nahi to global median
+        # Use the category median when available, otherwise use the global median.
         if category:
             baselines = matrix.groupby(values[category], dropna=False).transform('median')
         else:
             baselines = matrix.median()
 
-        # Robust scaling (IQR scale) taaki outliers normal data scale ko kharab na karein
+        # Scale by the interquartile range to reduce the influence of outliers.
         scale = matrix.quantile(0.75) - matrix.quantile(0.25)
         matrix = (matrix - baselines) / scale.replace(0, 1)
 
-        # Isolation Forest train karo (unsupervised outlier detection)
-        # Contamination rate dataset ke size ke mutabiq 4% se 12% ke beech dynamically set hoti hai
+        # Fit an Isolation Forest for unsupervised anomaly detection.
+        # Adjust the contamination rate between 4% and 12% based on dataset size.
         model = IsolationForest(
             n_estimators=100,
             contamination=min(0.12, max(0.04, 3 / len(values))),
@@ -60,11 +50,11 @@ class MLAgent:
         labels = model.fit_predict(matrix)
         scores = -model.decision_function(matrix)
 
-        # Scores ko 0 se 100 ke scale me normalize karo
+        # Normalize scores to a 0 to 100 scale.
         normalized = (scores - scores.min()) / max(float(np.ptp(scores)), 1e-9) * 100
         data = records(values)
 
-        # Jo rows anomaly mark hui hain (label == -1), unhe collect karo
+        # Collect rows labeled as anomalies (label == -1).
         for i in np.flatnonzero(labels == -1):
             score = round(float(normalized[i]), 1)
             output['anomalies'].append({
@@ -80,16 +70,12 @@ class MLAgent:
             })
 
         output['anomaly_count'] = len(output['anomalies'])
-        # Top 12 highest severity anomalies display karo
+        # Display the 12 highest-severity anomalies.
         output['anomalies'] = sorted(output['anomalies'], key=lambda a: -a['anomaly_score'])[:12]
         return dict(output, status='completed', note='Observations are flagged, never deleted as statistical outliers.')
 
     def forecast_trend(self, df, quality_report=None):
-        """
-        Time-Series Forecasting (Linear Projection):
-        - Past monthly data par line fit karta hai (np.polyfit).
-        - Aage aane wale 3 mahino ka forecast generate karta hai.
-        """
+        """Fit a line to historical monthly data and project the next three months."""
         date, metrics = temporal_inputs(df)
         result = {
             'historical': [],
@@ -109,7 +95,7 @@ class MLAgent:
         if values.empty:
             return result
 
-        # Month string banao (%Y-%m) aur monthly total calculate karo
+        # Format month keys as YYYY-MM and calculate monthly totals.
         values['_month'] = pd.to_datetime(values[date], format='mixed', utc=True).dt.strftime('%Y-%m')
         values['_revenue'] = values[metrics[0]] * values[metrics[1]] if len(metrics) == 2 else values[metrics[0]]
         historical = [
@@ -118,19 +104,19 @@ class MLAgent:
         ]
         result.update(historical=historical, data_points_count=len(historical))
 
-        # Forecasting ke liye kam se kam 2 months ka data chahiye
+        # Require at least two months of data for forecasting.
         if len(historical) < 2:
             return result
 
         periods = pd.PeriodIndex([h['period'] for h in historical], freq='M')
         x = np.array([p.ordinal - periods[0].ordinal for p in periods], dtype=float)
 
-        # Linear regression: slope (m) aur intercept (b) calculate karo
+        # Calculate the slope and intercept of the linear fit.
         m, b = np.polyfit(x, [h['revenue'] for h in historical], 1)
         mo, bo = np.polyfit(x, [h['orders'] for h in historical], 1)
 
         note = 'Unvalidated linear projection; no prediction interval, seasonality adjustment, or measured forecast confidence.'
-        # Agle 3 mahino ke projected points banao
+        # Project values for the next three months.
         forecast = [
             {
                 'period': str(periods[-1] + i),
@@ -152,7 +138,7 @@ class MLAgent:
         ))
 
     def analyze(self, df, quality_report=None):
-        """Dono methods (anomalies aur forecast) ko safely execute karke combine karta hai."""
+        """Run anomaly detection and forecasting and combine their results."""
         output = {}
         for key, method in [('anomalies', self.detect_anomalies), ('forecast', self.forecast_trend)]:
             try:

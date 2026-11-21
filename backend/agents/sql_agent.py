@@ -1,14 +1,4 @@
-"""
-SQL Agent (Autonomous Text-to-SQL)
-----------------------------------
-Ye agent user ke natural language questions ko safe SQLite SELECT queries me convert karta hai.
-
-Key Features:
-1. Deterministic Fast-Path: Common questions (jaise 'show me 10 rows', 'total rows') ko bina LLM ke instantly answer karta hai.
-2. Strict SQL Safety: Modifying queries (DROP, INSERT, UPDATE, DELETE, ALTER) ko strictly block karta hai using sqlglot AST parsing.
-3. In-Memory Execution: Cleaned data ko memory SQLite table ('orders') me load karke safe read-only authorizer ke sath execute karta hai.
-4. Auto Self-Correction: Agar pehli baar me SQL query fail hoti hai, to LLM ko error dikha kar 1 retry attempt karta hai.
-"""
+"""Convert natural-language questions to read-only SQLite queries. Use deterministic SQL for common questions, validate query structure, and retry once after a failed generated query."""
 import os
 import re
 import sqlite3
@@ -20,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class SQLAgent:
-    # Strictly prohibited keywords — data modification allowed nahi hai
+    # Prohibit keywords that could change data or database state.
     FORBIDDEN_KEYWORDS = [
         "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",
         "ATTACH", "DETACH", "CREATE", "REPLACE", "EXEC", "EXECUTE",
@@ -29,26 +19,18 @@ class SQLAgent:
 
     def __init__(
         self,
-        anthropic_api_key: Optional[str] = None,
         groq_api_key: Optional[str] = None,
         groq_model: Optional[str] = None,
-        anthropic_model: Optional[str] = None,
     ):
-        self.anthropic_api_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
         self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY")
         self.groq_model = groq_model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-        self.anthropic_model = anthropic_model or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 
     def _filter_validated_subset(self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
-        """Safe DataFrame copy return karta hai."""
+        """Return a safe copy of the DataFrame."""
         return validated_subset(df, quality_report)
 
     def _extract_schema(self, df: pd.DataFrame) -> str:
-        """
-        LLM ke liye database schema string banata hai.
-        Har column ka name, data type aur 3 sample values include karta hai
-        taaki LLM sahi column names use kare.
-        """
+        """Describe columns, data types, and up to three sample values per column for the language model."""
         schema_lines = ["Table: orders", "Columns:"]
         for col in df.columns:
             dtype = str(df[col].dtype)
@@ -58,30 +40,23 @@ class SQLAgent:
         return "\n".join(schema_lines)
 
     def _clean_sql(self, raw_output: str) -> str:
-        """
-        LLM ke output me se markdown fences (```sql ... ```),
-        <think> tags aur unnecessary comments hata kar pure SQL string nikaalta hai.
-        """
+        """Extract SQL from the model response by removing Markdown fences, think tags, and comments."""
         if not raw_output:
             return ""
         text = raw_output.strip()
         # Reasoning models ke <think> tags hatao
         text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
-        # Markdown code fence me se SQL extract karo
+        # Extract SQL from a Markdown code fence.
         match = re.search(r"```(?:sql)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
         if match:
             text = match.group(1).strip()
-        # Lines clean karo aur trailing semicolon hatao
+        # Clean the lines and remove the trailing semicolon.
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         cleaned = " ".join(lines).strip()
         return cleaned.rstrip(";")
 
     def _validate_sql_safety(self, sql):
-        """
-        SQLGlot parser use karke query ki AST (Abstract Syntax Tree) check karta hai:
-        - Sirf 1 single read-only SELECT / UNION query allowed hai.
-        - Koi bhi destructive command (INSERT, UPDATE, DELETE, DROP, CREATE) milte hi query reject hoti hai.
-        """
+        """Use SQLGlot to validate the syntax tree and allow only a single read-only SELECT or UNION query."""
         try:
             import sqlglot
             from sqlglot import exp
@@ -96,16 +71,12 @@ class SQLAgent:
             return False, 'Invalid or unsupported SQL.'
 
     def _call_llm(self, prompt: str, system_prompt: str) -> str:
-        """Providers module ke through LLM call karta hai."""
+        """Call the language model through the shared provider interface."""
         from providers import complete
         return complete(self, prompt, system_prompt)
 
     def _match_deterministic_query(self, question: str, df: pd.DataFrame) -> Optional[str]:
-        """
-        Common questions ke liye Fast-Path:
-        Agar user standard question puche (e.g. 'show me first 10 rows', 'how many records'),
-        to bina LLM call kiye instant accurate SQL generate karta hai.
-        """
+        """Generate deterministic SQL for common questions without calling a language model."""
         q = question.strip().lower().strip(' ?.! ')
 
         # 1. Preview rows (e.g. 'show me first 10 rows')
@@ -158,19 +129,12 @@ class SQLAgent:
         return None
 
     def _execute_sql(self, conn, sql):
-        """
-        In-Memory SQLite me query execute karta hai.
-        Safety features:
-        - PRAGMA query_only = ON (Disk write impossible)
-        - Custom Authorizer: Sirf 'orders' table read karne deta hai, load_extension block karta hai
-        - Progress Handler: 2-second timeout ke baad query kill ho jaati hai
-        - Row & Byte limits: Max 10,000 rows ya 5MB data
-        """
+        """Run the query in SQLite memory with a read-only authorizer, execution timeout, and bounded results."""
         import json
         import time
         self._truncated = False
 
-        # Pehle AST safety check karo
+        # Validate the SQL syntax tree before running it.
         safe, error = self._validate_sql_safety(sql)
         if not safe:
             return [], error
@@ -218,12 +182,7 @@ class SQLAgent:
             conn.set_progress_handler(None, 0)
 
     def generate_and_run(self, question, df, quality_report=None):
-        """
-        Main function:
-        1. DataFrame ko in-memory SQLite table 'orders' me daalta hai.
-        2. Natural language question ke liye SQL generate karta hai (Deterministic ya LLM).
-        3. Query run karta hai. Agar error aaye, to auto self-correction retry karta hai.
-        """
+        """Load the DataFrame into the in-memory orders table, generate and run SQL, and retry on failure."""
         from agents.validation import eligible_subset, numeric_columns
         population = eligible_subset(df)[1] if df is not None else {}
         result = {
@@ -240,7 +199,7 @@ class SQLAgent:
             return dict(result, error='A nonempty question and dataset are required.')
 
         with sqlite3.connect(':memory:') as conn:
-            # SQL me saari rows visible hoti hain; invalid conversion rows NULL dikhti hain
+            # Keep all rows visible in SQL and represent invalid conversions as NULL.
             sql_frame = df.copy()
             column_populations = {}
             for col in numeric_columns(df):
@@ -256,10 +215,10 @@ class SQLAgent:
             system = 'Generate one read-only SQLite SELECT query against orders. Output SQL only. Use the provided column names exactly.'
             prompt = f'Schema:\n{schema}\nQuestion: {question}'
 
-            # Pehle fast regex match try karo
+            # Try the deterministic pattern match first.
             sql = self._match_deterministic_query(question, df)
 
-            # Max 2 attempts: pehla normal, doosra self-correction retry agar query fail ho
+            # Allow two attempts: the initial query and one correction after failure.
             for attempt in range(2):
                 if not sql:
                     try:
@@ -268,11 +227,11 @@ class SQLAgent:
                         return dict(result, error='Language provider unavailable for this question.')
 
                 rows, error = self._execute_sql(conn, sql)
-                # Success: valid rows return karo
+                # Return the result rows after a successful query.
                 if error is None:
                     return dict(result, generated_sql=sql, result=rows, row_count=len(rows), truncated=self._truncated, error=None)
 
-                # Retry setup: Error LLM ko feed karke correction maangte hain
+                # Send the error to the language model to request a correction.
                 result.update(generated_sql=sql, error=error)
                 prompt = f'{prompt}\nCorrect this failed query: {sql}\nError was: {error}\nOnly return a read-only SELECT.'
                 sql = None
@@ -289,7 +248,7 @@ class SQLAgent:
         ]
 
     def _generate_deterministic_questions(self, df: pd.DataFrame) -> List[Dict[str, str]]:
-        """Dataset ke columns inspect karke 3-4 tailored starter questions banata hai."""
+        """Inspect the dataset columns to suggest starter questions."""
         if df is None or df.empty:
             return self.get_default_fallback_questions()
 
@@ -349,10 +308,7 @@ class SQLAgent:
     def generate_suggested_questions(
         self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, str]]:
-        """
-        LLM use karke dataset ke actual schema par based smart business questions suggest karta hai.
-        Agar LLM fail ho jaye, to deterministic fallback use karta hai.
-        """
+        """Generate questions based on the dataset schema and use a deterministic fallback if the provider fails."""
         if df is None or df.empty:
             return self.get_default_fallback_questions()
 

@@ -1,32 +1,23 @@
-"""
-Validation Module
------------------
-Ye module check karta hai ki specific analysis ke liye kaunse rows eligible hain.
-Poore dataset ko blindly delete karne ke bajaye, analysis-wise filtering karta hai.
-"""
+"""Determine which rows are eligible for each analysis while preserving the original dataset."""
 import numpy as np
 import pandas as pd
 import base64
 
 def eligible_subset(df, columns=(), date_column=None):
-    """
-    Given columns aur date_column ke liye sirf valid rows filter karke return karta hai.
-    Example: Agar revenue calculate karna hai, to sirf valid numbers select honge,
-    baaki rows discard nahi hoti balki audit reason ke saath track hoti hain.
-    """
+    """Select rows with valid values in the requested numeric and date columns. Track exclusions with audit reasons."""
     data = df.copy()
-    # Har row ka original line number track karte hain (CSV me row 2 se start hoti hai)
+    # Track original source row numbers. CSV data starts on line 2.
     source = list(df.attrs.get('source_rows', range(2, len(df) + 2)))
     keep = pd.Series(True, index=data.index)
     reasons = []
     reason_counts = {}
 
-    # 1. Numeric columns validate karo
+    # Validate numeric columns.
     for col in columns:
         values = pd.to_numeric(data[col], errors='coerce')
         valid = values.notna() & np.isfinite(values)
 
-        # User defined min/max constraints check karo (e.g. price >= 0)
+        # Apply user-defined bounds such as price >= 0.
         rule = df.attrs.get('numeric_constraints', {}).get(col, {})
         if rule.get('minimum') is not None:
             valid &= values >= rule['minimum']
@@ -37,7 +28,7 @@ def eligible_subset(df, columns=(), date_column=None):
         bad = np.flatnonzero(~valid.to_numpy())
         reason_counts[col] = len(bad)
 
-        # Ineligible rows ka reason record karo (max 100 for UI performance)
+        # Record up to 100 exclusion reasons for display.
         for i in bad[:max(0, 100 - len(reasons))]:
             reasons.append({
                 'row_index': source[i],
@@ -46,7 +37,7 @@ def eligible_subset(df, columns=(), date_column=None):
             })
         keep &= valid
 
-    # 2. Date column validate karo (agar time-series analysis ho raha hai)
+    # Validate the date column when the analysis uses dates.
     if date_column:
         values = pd.to_datetime(data[date_column], format='mixed', errors='coerce', utc=True)
         valid = values.notna()
@@ -60,12 +51,12 @@ def eligible_subset(df, columns=(), date_column=None):
             })
         keep &= valid
 
-    # Eligible rows ka filtered dataframe banao
+    # Build a DataFrame containing only eligible rows.
     result = data.loc[keep].copy().reset_index(drop=True)
     result.attrs = dict(df.attrs)
     result.attrs['source_rows'] = [r for r, k in zip(source, keep) if k]
 
-    # Population summary dict return karo (kitni rows include hui, kitni exclude hui aur kyu)
+    # Return counts and reasons for included and excluded rows.
     population = {
         'total_rows': len(df),
         'included_rows': len(result),
@@ -81,23 +72,18 @@ def eligible_subset(df, columns=(), date_column=None):
     return result, population
 
 def validated_subset(df, quality_report=None):
-    """Safe copy return karta hai; None hone par empty DataFrame."""
+    """Return a safe copy, or an empty DataFrame when the input is None."""
     return pd.DataFrame() if df is None else df.copy()
 
 def numeric_columns(df):
-    """
-    Dataset se saare numeric columns ke naam dhoond kar nikaalta hai.
-    Identifier columns (like order_id, user_id) ko automatically skip karta hai.
-    """
+    """Find numeric columns and skip identifiers such as order_id and user_id."""
     schema = df.attrs.get('schema')
     if schema:
         return [c['name'] for c in schema if c['role'] == 'numeric']
     return [c for c in df.select_dtypes(include=[np.number]).columns if not (c.lower() == 'id' or c.lower().endswith('_id'))]
 
 def temporal_inputs(df):
-    """
-    Time-series analysis ke liye date column aur metric column (revenue/sales/qty) pehchanta hai.
-    """
+    """Identify the date and metric columns for time-series analysis."""
     schema = df.attrs.get('schema') or []
     # 1. Date column dhoondo
     date = next((c['name'] for c in schema if c['role'] == 'date'), None)
