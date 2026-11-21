@@ -1,4 +1,13 @@
-"""Pure LangGraph workflow. Storage, jobs and HTTP live outside this module."""
+"""
+Multi-Agent Orchestrator (LangGraph DAG)
+----------------------------------------
+Data ingestion se lekar insights generation tak saare AI agents ko coordinate karta hai:
+1. DataAgent: CSV/Excel clean & audit karta hai.
+2. EDAAgent: Distributions, correlations, anomalies calculate karta hai.
+3. SQLAgent: Natural language to SQL queries evaluate karta hai.
+4. MLAgent: Feature engineering & predictive models train karta hai.
+5. InsightAgent & VisualizationAgent: Executive summaries aur charts banate hain.
+"""
 import operator
 import time
 from typing import Annotated,Any,TypedDict

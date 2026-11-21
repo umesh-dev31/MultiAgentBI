@@ -1,3 +1,12 @@
+/**
+ * File Upload Section Component
+ * ------------------------------
+ * Ye component user se dataset files (.csv, .xlsx, .xls) input leta hai:
+ * 1. Drag & Drop handling: File drag over aur drop events manage karta hai.
+ * 2. File input fallback: File explorer se browse karne ka button.
+ * 3. Active File Card: Jab file loaded ho to file name aur 'Analyze another file' reset button dikhata hai.
+ * 4. PipelineProgress: Upload hone par stage-by-stage pipeline progress indicator render karta hai.
+ */
 import React, { useRef, useState } from 'react'
 import { DatabaseImport } from './DatabaseImport'
 import { PipelineProgress } from './PipelineProgress'

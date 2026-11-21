@@ -29,6 +29,10 @@ export function DatabaseImport({ backendUrl = '', disabled = false, onFileUpload
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Import failed.') }
     finally { setBusy(false) }
   }
+  // Hidden from UI while keeping the entire code intact for future use
+  const HIDE_DATABASE_IMPORT = true
+  if (HIDE_DATABASE_IMPORT) return null
+
   return <details style={{ marginTop: 16, color: 'var(--text-secondary)', fontSize: 12 }}>
     <summary style={{ cursor: 'pointer', padding: '8px 0' }}>Import from a database</summary>
     <p>Import a table from your configured PostgreSQL, MySQL or SQLite source.</p>

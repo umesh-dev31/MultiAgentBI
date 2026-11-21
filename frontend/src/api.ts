@@ -1,3 +1,10 @@
+/**
+ * API Client & Network Helper
+ * ----------------------------
+ * Backend se JSON requests fetch karne ka centralized helper module:
+ * 1. ApiError: HTTP status code aur backend error message preserve karta hai.
+ * 2. requestJson<T>: Typed fetch wrapper jo non-200 responses par error extract karta hai.
+ */
 export class ApiError extends Error {
   readonly status: number
 

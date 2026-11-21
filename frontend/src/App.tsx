@@ -1,3 +1,12 @@
+/**
+ * Main Application Component (Router & Multi-tenant Workspace Manager)
+ * --------------------------------------------------------------------
+ * Ye poore frontend ka heart hai:
+ * 1. View & Auth Routing: '/', '/login', '/signup', aur '/workspace' handle karta hai.
+ * 2. Tab Navigation: Overview, Upload, Data Quality, EDA, SQL, ML, Insights, History.
+ * 3. Background Job Polling: Heavy dataset processing ke liye /api/jobs poll karta hai.
+ * 4. Dataset Snapshot Management: Active dataset aur historical runs restore karta hai.
+ */
 import { WorkspaceOverview } from './components/dashboard/WorkspaceOverview'
 import { useEffect, useRef, useState } from 'react'
 import { AuthPage } from './components/AuthPage'

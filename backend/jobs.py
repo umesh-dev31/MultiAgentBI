@@ -1,4 +1,11 @@
-"""Durable single-worker jobs with a supervised process and bounded admission."""
+"""
+Job Supervisor & Async Queue Manager
+------------------------------------
+Background worker thread pool jo asynchronous jobs ko handle karta hai:
+1. SQLite-backed job queue ('queued' -> 'running' -> 'completed'/'failed').
+2. Supervised worker process execution with timeout/deadline enforcement.
+3. Status polling endpoint compatibility (/api/jobs/{id}).
+"""
 import multiprocessing
 import threading
 import time

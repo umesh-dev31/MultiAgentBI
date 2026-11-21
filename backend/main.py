@@ -1,4 +1,11 @@
-"""HTTP contracts and compatibility adapters for a persistent personal backend."""
+"""
+FastAPI Server & API Gateway
+----------------------------
+Frontend aur AI Agents ke beech ka communication bridge:
+- Auth & Multi-tenant workspace management
+- File upload & Async job submission (/api/jobs)
+- Dataset analysis, EDA, SQL querying, Model building & Export
+"""
 import asyncio
 import html
 import json

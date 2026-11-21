@@ -1,4 +1,14 @@
-"""Ingest and audit CSV or Excel files. Preserve rows and identifier strings, parse currency values, and record changes with source row numbers."""
+"""
+Data Agent
+----------
+Ye agent raw CSV / Excel files ko ingest, audit aur clean karta hai.
+
+Key principles:
+1. Data Preservation: Koi bhi data silently delete nahi hota.
+2. Identifiers Protection: IDs (jaise 'ORD-001', 'SKU-99') ko string rakhte hain.
+3. Multi-currency Support: Currency symbols clean karke pure numbers nikaalta hai.
+4. Complete Audit Trail: Har row me jo bhi issue ya change hua, record hota hai.
+"""
 import re
 import csv
 import zipfile
@@ -185,7 +195,8 @@ class DataAgent:
                     for i in np.flatnonzero(missing.to_numpy()):
                         if i not in invalid_indices:
                             audit(i, col, raw_values[i], f'Explicit imputation with {fill}', True)
-                            frame.at[i, col] = fill
+                            idx = int(i)
+                            frame.loc[idx, col] = fill
                             fixed['missing_values_imputed'] += 1
 
             # Schema summary item
