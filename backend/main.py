@@ -17,7 +17,8 @@ from sqlalchemy.orm import sessionmaker
 from config import Settings
 from contracts import ImportOptions
 from db.database import make_engine,init_db
-from db.models import BrowserDataset
+from auth import get_workspace, install_auth
+from starlette.concurrency import run_in_threadpool
 from repository import DatasetRepository,DomainError
 from jobs import JobManager,TERMINAL
 from agents.eda_agent import EDAAgent
@@ -26,8 +27,6 @@ from agents.sql_agent import SQLAgent
 from agents.insight_agent import InsightAgent
 from agents.visualization_agent import VisualizationAgent
 from agents.knowledge_agent import KnowledgeAgent
-
-COOKIE = 'insight_session'
 
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1,max_length=4000)
@@ -38,6 +37,13 @@ class KnowledgeRequest(QueryRequest):
 
 class DatabaseImportRequest(BaseModel):
     table: str = Field(min_length=1,max_length=255)
+
+class ModelRequest(BaseModel):
+    target: str = Field(min_length=1, max_length=512)
+    features: list[str] = Field(min_length=1, max_length=200)
+    task: Literal['auto', 'classification', 'regression'] = 'auto'
+    algorithm: str | None = Field(default=None, max_length=80)
+
 
 def create_app(settings=None,start_worker=True):
     settings = settings or Settings()
@@ -59,7 +65,6 @@ def create_app(settings=None,start_worker=True):
                 app.state.jobs.close()
             engine.dispose()
     app = FastAPI(title='AgentInsight AI Backend',version='0.2.0',lifespan=lifespan)
-    app.add_middleware(CORSMiddleware,allow_origin_regex=r'https?://(localhost|127\.0\.0\.1)(:\d+)?',allow_credentials=True,allow_methods=['GET','POST'],allow_headers=['Content-Type'])
 
     @app.exception_handler(DomainError)
     async def domain_error(request,error):
@@ -77,17 +82,38 @@ def create_app(settings=None,start_worker=True):
     async def analysis_value_error(request,error):
         return JSONResponse(status_code=422,content={'detail':'The requested analysis cannot produce a valid result.','error':{'code':'ANALYSIS_INVALID','message':'The requested analysis cannot produce a valid result.'}})
 
-    def browser(request,response):
-        session_id = request.cookies.get(COOKIE)
-        if not session_id or not re.fullmatch(r'[a-f0-9]{32}',session_id):
-            session_id = uuid.uuid4().hex
-        response.set_cookie(COOKIE,session_id,httponly=True,samesite='strict',max_age=30*24*3600)
-        return session_id
+    install_auth(app, settings.data_dir / 'auth.db')
 
-    def resolve(request,dataset_id):
-        return app.state.repository.resolve(dataset_id,request.cookies.get(COOKIE))
+    public_auth_paths = {
+        '/api/auth/signup', '/api/auth/login', '/api/auth/session', '/api/auth/logout',
+    }
 
-    async def submit(file,options,request,response,mode='full',run_id=None):
+    async def require_workspace(request, call_next):
+        path = request.url.path.rstrip('/')
+        if path.startswith('/api/') and path not in public_auth_paths and request.method != 'OPTIONS':
+            workspace_id = await run_in_threadpool(get_workspace, request)
+            if workspace_id is None:
+                return JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Log in to access your workspace.'},
+                    headers={'Cache-Control': 'no-store'},
+                )
+            request.state.workspace_id = workspace_id
+            response = await call_next(request)
+            response.headers['Cache-Control'] = 'no-store'
+            return response
+        return await call_next(request)
+
+    app.middleware('http')(require_workspace)
+    app.add_middleware(CORSMiddleware,allow_origin_regex=r'https?://(localhost|127\.0\.0\.1)(:\d+)?',allow_credentials=True,allow_methods=['GET','POST'],allow_headers=['Content-Type'])
+
+    def resolve(request, dataset_id):
+        workspace_id = request.state.workspace_id
+        resolved = app.state.repository.resolve(dataset_id, workspace_id)
+        app.state.repository.require_owned(resolved, workspace_id)
+        return resolved
+
+    async def submit(file,options,request,mode='full',run_id=None):
         try:
             policy = ImportOptions.model_validate_json(options)
         except (ValidationError,ValueError):
@@ -109,7 +135,7 @@ def create_app(settings=None,start_worker=True):
                     output.write(chunk)
             if size==0:
                 raise DomainError(422,'EMPTY_UPLOAD','The uploaded file is empty.')
-            return app.state.jobs.submit(path,name,policy,browser(request,response),mode,run_id)
+            return app.state.jobs.submit(path,name,policy,request.state.workspace_id,mode,run_id)
         except BaseException:
             path.unlink(missing_ok=True)
             raise
@@ -136,45 +162,47 @@ def create_app(settings=None,start_worker=True):
         return {'status':'ok'}
 
     @app.post('/api/jobs',status_code=202)
-    async def create_job(request:Request,response:Response,file:UploadFile=File(...),options:str=Form('{}')):
-        job_id = await submit(file,options,request,response)
+    async def create_job(request:Request,file:UploadFile=File(...),options:str=Form('{}')):
+        job_id = await submit(file,options,request)
         return {'job_id':job_id,'status':'queued','status_url':'/api/jobs/'+job_id}
 
     @app.get('/api/jobs/{job_id}')
-    def get_job(job_id:str):
-        status = app.state.jobs.status(job_id)
-        if status['state'] in {'completed','completed_with_warnings'}:
+    def get_job(job_id:str, request:Request):
+        status = app.state.jobs.status(job_id, request.state.workspace_id)
+        if status['state'] in {'completed','completed_with_warnings'} and 'model_report' not in status:
             status['result'] = app.state.repository.snapshot(status['dataset_id'])
         return status
 
     @app.post('/api/pipeline/run')
-    async def pipeline(request:Request,response:Response,file:UploadFile=File(...),options:str=Form('{}'),run_id:str|None=None,session_id:str|None=None):
-        job_id = await submit(file,options,request,response,run_id=run_id or session_id)
+    async def pipeline(request:Request,file:UploadFile=File(...),options:str=Form('{}'),run_id:str|None=None,session_id:str|None=None):
+        job_id = await submit(file,options,request,run_id=run_id or session_id)
         return await wait_for_result(job_id)
 
     @app.post('/api/upload')
-    async def upload(request:Request,response:Response,file:UploadFile=File(...),options:str=Form('{}')):
-        job_id = await submit(file,options,request,response,mode='clean')
+    async def upload(request:Request,file:UploadFile=File(...),options:str=Form('{}')):
+        job_id = await submit(file,options,request,mode='clean')
         result = await wait_for_result(job_id)
         return dict(result['dataset_summary'],dataset_id=result['dataset_id'],warnings=result['warnings'])
 
     @app.get('/api/pipeline/status/{run_id}')
-    def old_status(run_id:str):
-        return app.state.jobs.status(run_id)
+    def old_status(run_id:str, request:Request):
+        return app.state.jobs.status(run_id, request.state.workspace_id)
 
     @app.get('/api/pipeline/status')
-    def old_status_query(run_id:str|None=None,session_id:str|None=None):
+    def old_status_query(request:Request, run_id:str|None=None,session_id:str|None=None):
         if not (run_id or session_id):
             raise DomainError(422,'JOB_ID_REQUIRED','Supply a run ID.')
-        return app.state.jobs.status(run_id or session_id)
+        return app.state.jobs.status(run_id or session_id, request.state.workspace_id)
 
     @app.get('/api/pipeline/stream')
     async def stream(session_id:str,request:Request):
-        app.state.jobs.status(session_id)
+        app.state.jobs.status(session_id, request.state.workspace_id)
         async def events():
             previous = None
             while not await request.is_disconnected():
-                status = app.state.jobs.status(session_id)
+                if await run_in_threadpool(get_workspace, request) != request.state.workspace_id:
+                    break
+                status = app.state.jobs.status(session_id, request.state.workspace_id)
                 encoded = json.dumps(status)
                 if encoded!=previous:
                     yield 'data: '+encoded+'\n\n'
@@ -187,27 +215,22 @@ def create_app(settings=None,start_worker=True):
         return StreamingResponse(events(),media_type='text/event-stream',headers={'Cache-Control':'no-cache'})
 
     @app.get('/api/history')
-    def history():
-        return app.state.repository.history()
+    def history(request:Request):
+        return app.state.repository.history(request.state.workspace_id)
 
     @app.get('/api/history/{dataset_id}')
-    def history_run(dataset_id:int,request:Request,response:Response):
-        result = app.state.repository.snapshot(dataset_id)
-        session_id = browser(request,response)
-        # Record only membership for ambiguity detection; no active-dataset pointer exists.
-        with app.state.sessions.begin() as session:
-            if session.get(BrowserDataset,(session_id,dataset_id)) is None:
-                session.add(BrowserDataset(session_id=session_id,dataset_id=dataset_id))
-        return result
+    def history_run(dataset_id:int,request:Request):
+        return app.state.repository.snapshot(resolve(request, dataset_id))
 
     @app.post('/api/datasets/{dataset_id}/query')
-    def dataset_query(dataset_id:int,body:QueryRequest):
+    def dataset_query(dataset_id:int,body:QueryRequest,request:Request):
+        dataset_id = resolve(request, dataset_id)
         context = app.state.repository.context(dataset_id)
         return dict(SQLAgent().generate_and_run(body.question,context.frame),dataset_id=dataset_id)
 
     @app.post('/api/query')
     def legacy_query(body:QueryRequest,request:Request):
-        return dataset_query(resolve(request,body.dataset_id),body)
+        return dataset_query(body.dataset_id,body,request)
 
     def analyze(dataset_id,kind):
         context = app.state.repository.context(dataset_id)
@@ -221,9 +244,52 @@ def create_app(settings=None,start_worker=True):
             result = dict(InsightAgent().generate_summary(eda,ml),**VisualizationAgent().suggest_charts(context.frame,eda))
         return dict(result,dataset_id=dataset_id)
 
+    def inspect_model_selection(dataset_id, body, request):
+        from model_builder import inspect_model
+        context = app.state.repository.context(resolve(request, dataset_id))
+        try:
+            inspection = inspect_model(context.frame, body.target, body.features, body.task)
+        except ValueError as error:
+            raise DomainError(422, 'MODEL_INVALID', str(error)) from error
+        return context.frame, inspection
+
+    def model_options(body, inspection):
+        algorithm = body.algorithm or inspection['recommended_algorithm']
+        if algorithm not in {option['id'] for option in inspection['algorithms']}:
+            raise DomainError(422, 'MODEL_ALGORITHM_INVALID', 'Choose an algorithm supported for this outcome.')
+        return dict(target=body.target, features=body.features, task=inspection['task'], algorithm=algorithm)
+
+    @app.post('/api/datasets/{dataset_id}/model/inspect')
+    def inspect_dataset_model(dataset_id: int, body: ModelRequest, request: Request):
+        return inspect_model_selection(dataset_id, body, request)[1]
+
+    @app.post('/api/datasets/{dataset_id}/model/train', status_code=202)
+    def train_dataset_model(dataset_id: int, body: ModelRequest, request: Request):
+        _, inspection = inspect_model_selection(dataset_id, body, request)
+        if not inspection['eligible'] or not inspection['workspace_eligible']:
+            reasons = inspection['reasons'] or inspection['workspace_reasons']
+            raise DomainError(422, 'MODEL_WORKSPACE_INELIGIBLE', ' '.join(reasons))
+        options = model_options(body, inspection)
+        job_id = app.state.jobs.submit_model(dataset_id, request.state.workspace_id, options)
+        return {'job_id': job_id, 'status_url': '/api/jobs/' + job_id}
+
+    @app.post('/api/datasets/{dataset_id}/model/export')
+    def export_dataset_model(dataset_id: int, body: ModelRequest, request: Request):
+        from model_export import build_model_export
+        frame, inspection = inspect_model_selection(dataset_id, body, request)
+        if not inspection['eligible']:
+            raise DomainError(422, 'MODEL_INELIGIBLE', ' '.join(inspection['reasons']))
+        try:
+            bundle = build_model_export(frame, **model_options(body, inspection))
+        except ValueError as error:
+            raise DomainError(422, 'MODEL_INVALID', str(error)) from error
+        return Response(bundle, media_type='application/zip', headers={
+            'Content-Disposition': 'attachment; filename="agentinsight-colab.zip"',
+        })
+
     @app.post('/api/datasets/{dataset_id}/analysis/{kind}')
-    def dataset_analysis(dataset_id:int,kind:Literal['eda','ml-insights','insights']):
-        return analyze(dataset_id,kind)
+    def dataset_analysis(dataset_id:int,kind:Literal['eda','ml-insights','insights'],request:Request):
+        return analyze(resolve(request,dataset_id),kind)
 
     @app.post('/api/eda')
     def eda(request:Request,dataset_id:int|None=None):
@@ -250,20 +316,21 @@ def create_app(settings=None,start_worker=True):
     def knowledge(body:KnowledgeRequest,request:Request):
         dataset_id = resolve(request,body.dataset_id) if body.scope=='current' else body.dataset_id
         if dataset_id is not None:
-            app.state.repository.snapshot(dataset_id)
+            resolve(request, dataset_id)
         with app.state.sessions() as session:
-            return KnowledgeAgent().answer_question(body.question,current_dataset_id=dataset_id,scope=body.scope,db_session=session)
+            return KnowledgeAgent().answer_question(body.question,current_dataset_id=dataset_id,scope=body.scope,db_session=session,workspace_id=request.state.workspace_id)
 
     @app.get('/api/knowledge/suggested-questions')
     def knowledge_questions(request:Request,scope:Literal['current','all_history']='current',dataset_id:int|None=None):
         dataset_id = resolve(request,dataset_id) if scope=='current' else dataset_id
         if dataset_id is not None:
-            app.state.repository.snapshot(dataset_id)
+            resolve(request, dataset_id)
         with app.state.sessions() as session:
-            return {'questions':KnowledgeAgent().get_suggested_questions(current_dataset_id=dataset_id,scope=scope,db_session=session)}
+            return {'questions':KnowledgeAgent().get_suggested_questions(current_dataset_id=dataset_id,scope=scope,db_session=session,workspace_id=request.state.workspace_id)}
 
     @app.get('/api/export/{dataset_id}')
-    def export(dataset_id:int,format:Literal['json','csv','html']='json'):
+    def export(dataset_id:int,request:Request,format:Literal['json','csv','html']='json'):
+        dataset_id = resolve(request,dataset_id)
         result = app.state.repository.snapshot(dataset_id)
         if format=='csv':
             data = app.state.repository.context(dataset_id).frame

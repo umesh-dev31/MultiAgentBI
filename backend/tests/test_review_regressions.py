@@ -39,10 +39,31 @@ def test_explicit_dataset_isolation_and_legacy_ambiguity(client,complete_job):
     assert fetch(second['dataset_id'])==3
     assert client.post('/api/query',json={'question':'how many rows','dataset_id':999999}).status_code==404
 
-def test_new_browser_has_no_implicit_latest_dataset(client,complete_job):
-    complete_job()
+def test_workspace_isolates_history_jobs_and_dataset_operations(client, complete_job):
+    job = complete_job()
+    dataset_id = job['dataset_id']
+    job_id = job['job_id']
     client.cookies.clear()
-    assert client.post('/api/query',json={'question':'how many rows'}).status_code==409
+    assert client.get('/api/history').status_code == 401
+    assert client.post('/api/auth/signup', json={
+        'username': 'second', 'email': 'second@example.com', 'password': 'test-password',
+    }).status_code in (200, 201)
+    assert client.get('/api/history').json() == []
+    assert client.post('/api/query', json={'question': 'how many rows'}).status_code == 409
+    for url in (
+        f'/api/history/{dataset_id}', f'/api/export/{dataset_id}',
+        f'/api/jobs/{job_id}', f'/api/pipeline/status/{job_id}',
+        f'/api/pipeline/stream?session_id={job_id}',
+        f'/api/knowledge/suggested-questions?scope=all_history&dataset_id={dataset_id}',
+    ):
+        assert client.get(url).status_code == 404, url
+    assert client.post(f'/api/datasets/{dataset_id}/query', json={'question': 'how many rows'}).status_code == 404
+    assert client.post('/api/auth/logout').status_code == 204
+    assert client.post('/api/auth/login', json={
+        'identifier': 'tester', 'password': 'test-password',
+    }).status_code == 200
+    assert client.get(f'/api/history/{dataset_id}').status_code == 200
+    assert client.get(f'/api/jobs/{job_id}').status_code == 200
 
 def test_history_population_and_context_are_independent_copies(client,complete_job):
     job = complete_job()

@@ -5,6 +5,7 @@ import { useTheme } from '../../context/ThemeContext'
 
 interface LandingPageProps {
   onLaunch: () => void
+  signedIn?: boolean
   backendOnline?: boolean | null
   hasData?: boolean
   activeFileName?: string
@@ -158,6 +159,7 @@ const PRINCIPLES = [
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   onLaunch,
+  signedIn = false,
   backendOnline,
   hasData = false,
   activeFileName,
@@ -204,7 +206,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       <header className={`sticky top-0 z-50 w-full backdrop-blur-md border-b transition-colors ${
         isDark ? 'bg-black/95 border-white/15' : 'bg-white/95 border-black/10'
       }`}>
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between">
 
           {/* Monochrome Logo & Wordmark */}
           <div className="flex items-center gap-3">
@@ -239,7 +241,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </nav>
 
           {/* Right Actions: Status + Latency + Theme Toggle + Launch */}
-          <div className="flex items-center gap-3 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <div className={`hidden sm:flex items-center gap-2 px-2.5 py-1 border rounded ${
               isDark ? 'border-white/15 bg-white/[0.04]' : 'border-black/10 bg-black/[0.03]'
             }`}>
@@ -271,12 +273,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
             {/* Theme Toggle Button */}
             <ThemeToggle />
+            {signedIn ? (
+              <a href="/workspace" className="whitespace-nowrap text-sm font-semibold hover:underline">Workspace</a>
+            ) : (
+              <>
+                <a href="/login" className="whitespace-nowrap text-sm font-medium hover:underline">Log in</a>
+                <a href="/signup" className="whitespace-nowrap text-sm font-semibold hover:underline">Sign up</a>
+              </>
+            )}
 
             <MagneticButton
               onClick={onLaunch}
               id="landing-nav-launch-btn"
               maxShift={4}
-              className="btn-launch-primary h-8 px-4 text-[13px] font-semibold rounded"
+              className="btn-launch-primary hidden sm:inline-flex items-center h-8 px-4 text-[13px] font-semibold rounded"
               style={{
                 backgroundColor: isDark ? '#ffffff' : '#000000',
                 color: isDark ? '#000000' : '#ffffff',

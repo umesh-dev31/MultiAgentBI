@@ -322,3 +322,19 @@ $env:PYTHON_DOTENV_DISABLED = '1'
 ```
 
 Tests use temporary databases and disable LLM calls in regression fixtures. SQLite source import is tested; live PostgreSQL/MySQL connections and provider-backed LLM responses require configured services. The PPT's XGBoost, Transformers, Matplotlib/Seaborn references remain proposed alternatives; the current implementation uses IsolationForest, NumPy linear fitting, TF-IDF retrieval, and frontend chart rendering.
+
+### Accounts and workspaces
+
+The public landing page lives at `/`. Create an account at `/signup` or sign in at `/login`. Each account gets one personal workspace at `/workspace`. Use the workspace header to sign out.
+
+The backend stores accounts and revocable sessions in `auth.db` under `INSIGHT_DATA_DIR`, alongside the default analytics database and uploads. Keep that directory on persistent storage. Serve the frontend and API on the same origin through the development proxy or a reverse proxy. For HTTPS deployments where the backend receives plain HTTP from the proxy, set `INSIGHT_SECURE_COOKIE=1`.
+
+Uploads from before account support are not assigned to new accounts. Reupload the original files from your workspace to use them. The optional `ANALYTICS_DATABASE_URL` is an operator-configured shared source accessible to signed-in accounts when enabled. Leave it unset if it contains data that should not be shared.
+
+### Build a model
+
+Open a dataset in your workspace, then go to **ML Insights → Build a Model**. Select the recorded outcome and the input columns that would be available when making a prediction. AgentInsight checks eligibility and recommends an algorithm based on the task and dataset. You can choose a different supported algorithm.
+
+**Train in workspace** runs eligible small jobs in the existing background queue and shows held-out metrics, a baseline, and charts. **Export for Colab** downloads a ZIP containing a notebook and a CSV with the selected columns. Extract the ZIP, open the notebook in Colab, run all cells, and upload the CSV at the prompt. Colab runs on its own resources and quotas. Workspace data stays in AgentInsight until you download and upload it yourself.
+
+Both training paths fit preprocessing on the training split and evaluate on held-out rows. This version covers numeric and categorical outcomes using ordinary tabular data. For data where rows are related by time, customer, or another group, a random row split may give optimistic results. Time-based and group-based evaluation are outside this version.

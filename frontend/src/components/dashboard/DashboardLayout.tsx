@@ -5,7 +5,7 @@ import { RightInspector } from './RightInspector'
 import { ThemeToggle } from '../ThemeToggle'
 import type { PipelineExecutionLog, UploadResponse } from '../../types/data'
 
-type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
+type ActiveTab = 'overview' | 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
 
 interface DashboardLayoutProps {
   children: React.ReactNode
@@ -13,6 +13,9 @@ interface DashboardLayoutProps {
   onTabChange: (tab: ActiveTab) => void
   hasData: boolean
   onLanding: () => void
+  username: string
+  onLogout: () => void
+  signingOut: boolean
   onReset: () => void
   onExport?: (format: 'csv' | 'json' | 'html') => void
   exporting?: boolean
@@ -31,6 +34,9 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   onTabChange,
   hasData,
   onLanding,
+  username,
+  onLogout,
+  signingOut,
   onReset,
   onExport,
   exporting = false,
@@ -57,7 +63,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   const shellClass = [
     'dashboard-shell',
     navCollapsed ? 'nav-collapsed' : '',
-    !inspectorOpen ? 'inspector-closed' : '',
+    !inspectorOpen || activeTab === 'overview' ? 'inspector-closed' : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -151,7 +157,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Dashboard</span>
             <span style={{ color: 'var(--border-medium)' }}>›</span>
             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', textTransform: 'capitalize' }}>
-              {activeTab === 'sql' ? 'Ask a Question' : activeTab === 'eda' ? 'Exploration' : activeTab === 'ml' ? 'ML Insights' : activeTab === 'insights' ? 'Business Summary' : activeTab === 'quality' ? 'Data Quality' : activeTab === 'history' ? 'Upload History' : 'Upload'}
+              {activeTab === 'overview' ? 'Overview' : activeTab === 'sql' ? 'Ask a Question' : activeTab === 'eda' ? 'Exploration' : activeTab === 'ml' ? 'ML Insights' : activeTab === 'insights' ? 'Business Summary' : activeTab === 'quality' ? 'Data Quality' : activeTab === 'history' ? 'Upload History' : 'Upload'}
             </span>
           </div>
 
@@ -199,12 +205,12 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 backdropFilter: 'blur(10px)',
                 fontSize: 11,
                 fontWeight: 600,
-                color: '#f87171',
+                color: 'var(--color-error-text)',
                 maxWidth: 400,
                 boxShadow: '0 0 14px rgba(239,68,68,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
               }}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0, color: '#f87171' }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0, color: 'var(--color-error-text)' }}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
               </svg>
               <span
@@ -219,7 +225,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
               {onDismissError && (
                 <button
                   onClick={onDismissError}
-                  style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: 0, fontSize: 13, lineHeight: 1 }}
+                  style={{ background: 'none', border: 'none', color: 'var(--color-error-text)', cursor: 'pointer', padding: 0, fontSize: 13, lineHeight: 1 }}
                 >
                   ×
                 </button>
@@ -231,6 +237,17 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         {/* Right: controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <ThemeToggle />
+          <details className="relative">
+            <summary className="btn-ghost cursor-pointer text-xs" aria-label={'Account for ' + username}>
+              Account
+            </summary>
+            <div className="workspace-account-menu">
+              <span title={username}>{username}</span>
+              <button type="button" className="btn-ghost" onClick={onLogout} disabled={signingOut}>
+                {signingOut ? 'Logging out…' : 'Log out'}
+              </button>
+            </div>
+          </details>
           {hasData && onExport && (
             <select aria-label="Download analysis" disabled={exporting || isProcessing}
               value="" className="btn-ghost" style={{ fontSize: 11, padding: '5px 8px', maxWidth: 150 }}
@@ -258,6 +275,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
           <button
             onClick={() => setInspectorOpen(p => !p)}
+            hidden={activeTab === 'overview'}
             className="btn-ghost"
             style={{ fontSize: 11, padding: '5px 12px', gap: 6 }}
             title={inspectorOpen ? 'Hide inspector panel' : 'Show inspector panel'}
@@ -288,7 +306,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
       </main>
 
       {/* ── Right Inspector ──────────────────────────────────────────────── */}
-      {inspectorOpen && (
+      {inspectorOpen && activeTab !== 'overview' && (
         <RightInspector
           datasetResult={datasetResult}
           pipelineLogs={pipelineLogs}

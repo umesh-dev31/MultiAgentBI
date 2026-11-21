@@ -33,6 +33,10 @@ def client(configured):
     from main import create_app
     from fastapi.testclient import TestClient
     with TestClient(create_app(configured,start_worker=False)) as client:
+        response = client.post('/api/auth/signup', json={
+            'username': 'tester', 'email': 'tester@example.com', 'password': 'test-password',
+        })
+        assert response.status_code in (200, 201), response.text
         yield client
 
 @pytest.fixture

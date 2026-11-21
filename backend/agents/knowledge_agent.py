@@ -12,7 +12,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from db.database import SessionLocal
 
-from db.models import KnowledgeChunk, Dataset
+from db.models import BrowserDataset, KnowledgeChunk, Dataset
 
 load_dotenv()
 
@@ -217,6 +217,23 @@ class KnowledgeAgent:
 
         return saved_records
 
+    @staticmethod
+    def _workspace_chunks(session, workspace_id, current_dataset_id):
+        query = session.query(KnowledgeChunk)
+        if workspace_id is None:
+            if current_dataset_id is not None and session.get(Dataset, current_dataset_id) is None:
+                raise ValueError('Dataset not found')
+            return query
+
+        if current_dataset_id is not None and session.get(
+            BrowserDataset, (workspace_id, current_dataset_id)
+        ) is None:
+            raise ValueError('Dataset not found')
+        owned_datasets = session.query(BrowserDataset.dataset_id).filter(
+            BrowserDataset.session_id == workspace_id
+        )
+        return query.filter(KnowledgeChunk.dataset_id.in_(owned_datasets.statement))
+
     def answer_question(
 
         self,
@@ -231,6 +248,8 @@ class KnowledgeAgent:
 
         db_session=None,
 
+        *,
+        workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
 
         """Answers a user meta-question using TF-IDF retrieval + LLM synthesis.
@@ -248,6 +267,7 @@ class KnowledgeAgent:
             top_k: Number of chunks to retrieve
 
             db_session: optional SQLAlchemy session
+            workspace_id: restrict retrieval to datasets owned by this workspace
 
             
 
@@ -282,12 +302,8 @@ class KnowledgeAgent:
             own_session = True
 
         try:
-            if current_dataset_id is not None and session.get(Dataset,current_dataset_id) is None:
-                raise ValueError('Dataset not found')
-
-            # Query chunks based on scope
-
-            query = session.query(KnowledgeChunk)
+            workspace_chunks = self._workspace_chunks(session, workspace_id, current_dataset_id)
+            query = workspace_chunks
 
             if scope == "current" and current_dataset_id is not None:
 
@@ -301,9 +317,9 @@ class KnowledgeAgent:
 
                 if scope == "current" and current_dataset_id is not None:
 
-                    # Check if any chunks exist in any dataset
+                    # Check whether the workspace has chunks from other datasets.
 
-                    any_chunks = session.query(KnowledgeChunk).first()
+                    any_chunks = workspace_chunks.first()
 
                     if any_chunks:
 
@@ -608,6 +624,8 @@ class KnowledgeAgent:
         current_dataset_id: Optional[int] = None,
         scope: str = "current",
         db_session=None,
+        *,
+        workspace_id: Optional[str] = None,
     ) -> List[str]:
         """Returns dynamic, schema- and audit-tailored suggested questions for the RAG Knowledge Agent."""
         if scope not in {'current','all_history'}:
@@ -622,9 +640,8 @@ class KnowledgeAgent:
 
         questions: List[str] = []
         try:
-            if current_dataset_id is not None and session.get(Dataset,current_dataset_id) is None:
-                raise ValueError('Dataset not found')
-            query = session.query(KnowledgeChunk)
+            workspace_chunks = self._workspace_chunks(session, workspace_id, current_dataset_id)
+            query = workspace_chunks
             if scope == "current" and current_dataset_id is not None:
                 query = query.filter(KnowledgeChunk.dataset_id == current_dataset_id)
             chunks = query.all()

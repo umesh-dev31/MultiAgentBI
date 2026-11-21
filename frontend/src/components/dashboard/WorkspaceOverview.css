@@ -1,0 +1,18 @@
+.workspace-overview { max-width: 1040px; margin: 0 auto; display: grid; gap: 1.4rem; color: var(--text-primary); }
+.workspace-overview h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 2.75rem); font-weight: 750; letter-spacing: -.04em; overflow-wrap: anywhere; }
+.workspace-overview h2 { font-size: 1rem; margin: 0; font-weight: 700; }
+.workspace-overview p { color: var(--text-secondary); margin: .35rem 0 0; font-size: .875rem; overflow-wrap: anywhere; }
+.overview-panel { border: 1px solid var(--border-subtle); background: var(--bg-surface1); border-radius: .85rem; }
+.overview-start, .overview-recent { padding: clamp(.85rem, 3vw, 1.45rem); }
+.overview-start, .overview-section-header, .overview-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; }
+.overview-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: .65rem; margin-top: .65rem; }
+.overview-tool { display: flex; align-items: center; justify-content: space-between; gap: .65rem; padding: .85rem 1rem; text-align: left; cursor: pointer; color: var(--text-primary); }
+.overview-tool strong, .overview-tool span span { display: block; }
+.overview-tool span span { color: var(--text-secondary); font-size: .8rem; margin-top: .2rem; }
+.overview-tool:hover, .overview-recent li button:hover { background: var(--bg-surface-hover); }
+.overview-recent ul { margin-top: .65rem; padding: 0; list-style: none; }
+.overview-recent li { border-top: 1px solid var(--border-subtle); }
+.overview-recent li button { display: flex; width: 100%; text-align: left; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .4rem .8rem; padding: .7rem .3rem; cursor: pointer; font-size: .85rem; overflow-wrap: anywhere; }
+.overview-recent li button:disabled { cursor: wait; }
+.overview-recent li span { color: var(--text-secondary); }
+.workspace-overview button:focus-visible { outline: 2px solid var(--accent-indigo); outline-offset: 3px; }

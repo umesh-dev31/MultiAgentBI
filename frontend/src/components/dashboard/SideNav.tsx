@@ -1,6 +1,6 @@
 import React from 'react'
 
-type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
+type ActiveTab = 'overview' | 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
 
 interface SideNavProps {
   activeTab: ActiveTab
@@ -20,6 +20,17 @@ const NAV_ITEMS: {
   requiresData: boolean
   description: string
 }[] = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    requiresData: false,
+    description: 'Workspace home',
+    icon: (
+      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d="m3 10 9-7 9 7v10H3zM9 20v-6h6v6"/>
+      </svg>
+    ),
+  },
   {
     id: 'upload',
     label: 'Upload',
@@ -155,9 +166,10 @@ export const SideNav: React.FC<SideNavProps> = ({
               onClick={() => !disabled && onTabChange(item.id)}
               title={collapsed ? `${item.label} — ${item.description}` : item.description}
               disabled={disabled}
+              aria-current={isActive ? 'page' : undefined}
+              aria-label={item.label}
               className={`nav-item${isActive ? ' active' : ''}`}
               style={{
-                opacity: disabled ? 0.35 : 1,
                 cursor: disabled ? 'not-allowed' : 'pointer',
                 justifyContent: collapsed ? 'center' : 'flex-start',
                 padding: collapsed ? '9px 0' : undefined,

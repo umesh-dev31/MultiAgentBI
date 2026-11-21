@@ -29,23 +29,41 @@ class JobManager:
         self.thread = threading.Thread(target=self._loop,daemon=True,name='job-supervisor')
         self.thread.start()
 
-    def submit(self,path,filename,options,browser_session,mode='full',run_id=None):
-        with self.lock,self.sessions.begin() as session:
+    def _enqueue(self, job):
+        with self.lock, self.sessions.begin() as session:
             count = session.scalar(select(func.count()).select_from(Job).where(Job.state.in_(['queued','running'])))
-            if count >= self.settings.queue_size+1:
-                raise DomainError(429,'QUEUE_FULL','One job is active and the waiting queue is full.')
-            job_id = run_id or uuid.uuid4().hex
-            if session.get(Job,job_id):
-                raise DomainError(409,'JOB_EXISTS','This run ID already exists.')
-            session.add(Job(id=job_id,source_path=str(path),filename=filename,options=options.model_dump(),browser_session=browser_session,mode=mode,state='queued',stages={}))
-            return job_id
+            if count >= self.settings.queue_size + 1:
+                raise DomainError(429, 'QUEUE_FULL', 'One job is active and the waiting queue is full.')
+            if session.get(Job, job.id):
+                raise DomainError(409, 'JOB_EXISTS', 'This run ID already exists.')
+            session.add(job)
+            return job.id
 
-    def status(self,job_id):
+    def submit(self,path,filename,options,browser_session,mode='full',run_id=None):
+        return self._enqueue(Job(
+            id=run_id or uuid.uuid4().hex, source_path=str(path), filename=filename,
+            options=options.model_dump(), browser_session=browser_session, mode=mode,
+            state='queued', stages={},
+        ))
+
+    def submit_model(self, dataset_id, workspace_id, options):
+        return self._enqueue(Job(
+            id=uuid.uuid4().hex, source_path='', filename='', options=options,
+            browser_session=workspace_id, mode='model', dataset_id=dataset_id,
+            state='queued', stages={},
+        ))
+
+    def status(self,job_id,workspace_id=None):
         with self.sessions() as session:
             job = session.get(Job,job_id)
-            if job is None:
+            if job is None or (workspace_id is not None and job.browser_session != workspace_id):
                 raise DomainError(404,'JOB_NOT_FOUND','Job not found.')
-            return {'job_id':job.id,'run_id':job.id,'session_id':job.id,'status':job.state,'state':job.state,'dataset_id':job.dataset_id,'stages':job.stages,'error':job.error,'created_at':job.created_at.isoformat()+'Z','started_at':job.started_at.isoformat()+'Z' if job.started_at else None,'finished_at':job.finished_at.isoformat()+'Z' if job.finished_at else None,'status_url':'/api/jobs/'+job.id}
+            stages = dict(job.stages or {})
+            report = stages.pop('model_report', None)
+            status = {'job_id':job.id,'run_id':job.id,'session_id':job.id,'status':job.state,'state':job.state,'dataset_id':job.dataset_id,'stages':stages,'error':job.error,'created_at':job.created_at.isoformat()+'Z','started_at':job.started_at.isoformat()+'Z' if job.started_at else None,'finished_at':job.finished_at.isoformat()+'Z' if job.finished_at else None,'status_url':'/api/jobs/'+job.id}
+            if job.mode == 'model':
+                status['model_report'] = report
+            return status
 
     def _fail(self,code,message):
         changed = False

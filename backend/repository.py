@@ -54,9 +54,18 @@ class DatasetRepository:
             dataset,run = self.get_run(session,dataset_id)
             return {'status':'completed_with_warnings' if run.warnings else 'success','dataset_id':dataset.id,'dataset':dataset.to_dict(),'filename':dataset.filename,'dataset_summary':run.dataset_summary,'data_quality_report':run.audit_report,'data_health_score':run.data_health_score,'eda_result':run.eda_result,'ml_result':run.ml_result,'visualization_result':run.visualization_result,'insight_result':run.insight_result,'suggested_questions':run.suggested_questions or [],'execution_logs':run.execution_logs or [],'stage_statuses':run.stage_statuses or {},'warnings':run.warnings or [],'policy_version':run.policy_version,'populations':run.eligibility or {},'source_rows':run.source_rows or [],'schema':run.schema_info or [],'cleaning_policy':run.cleaning_policy or {}}
 
-    def history(self):
+    def require_owned(self, dataset_id, workspace_id):
         with self.sessions() as session:
-            return [d.to_dict() for d in session.scalars(select(Dataset).order_by(Dataset.id.desc()))]
+            if session.get(BrowserDataset, (workspace_id, dataset_id)) is None:
+                raise DomainError(404, 'DATASET_NOT_FOUND', 'Dataset not found.')
+
+    def history(self, workspace_id=None):
+        with self.sessions() as session:
+            query = select(Dataset).order_by(Dataset.id.desc())
+            if workspace_id is not None:
+                dataset_ids = select(BrowserDataset.dataset_id).where(BrowserDataset.session_id == workspace_id)
+                query = query.where(Dataset.id.in_(dataset_ids))
+            return [dataset.to_dict() for dataset in session.scalars(query)]
 
     def save(self,job_id,state):
         """One transaction contains the complete required analysis and dataset identity."""

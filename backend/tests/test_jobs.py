@@ -52,6 +52,10 @@ def test_real_worker_and_synchronous_compatibility(configured):
     from main import create_app
     from fastapi.testclient import TestClient
     with TestClient(create_app(configured)) as client:
+        signup = client.post('/api/auth/signup', json={
+            'username': 'tester', 'email': 'tester@example.com', 'password': 'test-password',
+        })
+        assert signup.status_code in (200, 201), signup.text
         response=client.post('/api/upload',files={'file':('a.csv',b'id,revenue\n001,10\n002,20\n')})
         assert response.status_code==200,response.text
         assert response.json()['dataset_id']
@@ -70,6 +74,10 @@ def test_async_job_completes_after_submission(configured):
     from main import create_app
     from fastapi.testclient import TestClient
     with TestClient(create_app(configured)) as client:
+        signup = client.post('/api/auth/signup', json={
+            'username': 'tester', 'email': 'tester@example.com', 'password': 'test-password',
+        })
+        assert signup.status_code in (200, 201), signup.text
         response=client.post('/api/jobs',files={'file':('a.csv',b'id,revenue\n001,10\n002,20\n')})
         assert response.status_code==202
         status=response.json()

@@ -1,4 +1,6 @@
+import { WorkspaceOverview } from './components/dashboard/WorkspaceOverview'
 import { useEffect, useRef, useState } from 'react'
+import { AuthPage } from './components/AuthPage'
 import { LandingPage } from './components/landing/LandingPage'
 import { DashboardLayout } from './components/dashboard/DashboardLayout'
 import { CenterCanvas } from './components/dashboard/CenterCanvas'
@@ -10,36 +12,37 @@ import { CategoricalDistributions } from './components/eda/CategoricalDistributi
 import { CorrelationMatrix } from './components/eda/CorrelationMatrix'
 import { MonthlyTrendChart } from './components/eda/MonthlyTrendChart'
 import { AskQuestionView } from './components/sql/AskQuestionView'
-import { MLInsightsView } from './components/ml/MLInsightsView'
+import { MLWorkspace } from './components/ml/MLWorkspace'
 import { BusinessSummaryView } from './components/insights/BusinessSummaryView'
 import { HistoryView } from './components/history/HistoryView'
 import { ApiError, requestJson } from './api'
+import { getSession, logout, type AuthSession } from './auth'
 import type { EDAResponse, JobStatus, PipelineRunResponse } from './types/data'
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
+// The same-origin proxy lets every workspace request carry the session cookie.
+const BACKEND_URL = ''
 
-type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
-type AppView = 'landing' | 'dashboard'
+type ActiveTab = 'overview' | 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
+const workspaceTabs: ActiveTab[] = ['overview', 'upload', 'quality', 'eda', 'sql', 'ml', 'insights', 'history']
 
-function App() {
-  const [currentView, setCurrentView] = useState<AppView>(() => {
-    try {
-      const params = new URLSearchParams(window.location.search)
-      if (params.get('view') === 'dashboard' || params.get('tab')) return 'dashboard'
-    } catch {}
-    return 'landing'
-  })
+function workspacePath(tab: string | null) {
+  return tab && workspaceTabs.includes(tab as ActiveTab) ? '/workspace?tab=' + tab : '/workspace'
+}
+
+function AnalyticsApp({ session, backendOnline }: { session: AuthSession; backendOnline: boolean | null }) {
+  const [signingOut, setSigningOut] = useState(false)
+
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     try {
       const params = new URLSearchParams(window.location.search)
       const t = params.get('tab') as ActiveTab
-      if (t && ['upload', 'quality', 'eda', 'sql', 'ml', 'insights', 'history'].includes(t)) {
+      if (t && workspaceTabs.includes(t)) {
         return t
       }
     } catch {}
-    return 'upload'
+    return 'overview'
   })
-  const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
+
   const [exporting, setExporting] = useState(false)
   const [uploading, setUploading] = useState<boolean>(false)
   const [edaLoading, setEdaLoading] = useState<boolean>(false)
@@ -61,45 +64,22 @@ function App() {
 
   useEffect(() => () => operation.current?.abort(), [])
 
-  // Verify backend health on mount and periodically
-  const checkHealth = async () => {
+  async function handleLogout() {
+    if (signingOut) return
+    setSigningOut(true)
     try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 4000)
-
-      let ok = false
-      try {
-        const res = await fetch(`${BACKEND_URL}/health`, { signal: controller.signal })
-        ok = res.ok
-      } catch {
-        // Fallback to 127.0.0.1 only in local dev (VITE_BACKEND_URL is set)
-        if (import.meta.env.VITE_BACKEND_URL) {
-          try {
-            const fallbackRes = await fetch('http://127.0.0.1:8000/health', { signal: controller.signal })
-            ok = fallbackRes.ok
-          } catch {
-            ok = false
-          }
-        } else {
-          ok = false
-        }
-      } finally {
-        clearTimeout(timeoutId)
-      }
-
-      setBackendOnline(ok)
+      await logout()
+      window.location.replace('/')
     } catch {
-      if (!uploading) {
-        setBackendOnline(false)
-      }
+      setError('Could not log out. Please try again.')
+      setSigningOut(false)
     }
   }
 
-  useEffect(() => {
-    checkHealth()
-    const interval = setInterval(checkHealth, 3000)
-    return () => clearInterval(interval)
-  }, [])
+  function handleTabChange(tab: ActiveTab) {
+    setActiveTab(tab)
+    window.history.replaceState(null, '', workspacePath(tab))
+  }
 
   const handleUploadFile = async (file: File) => {
     if (operation.current) return
@@ -145,8 +125,7 @@ function App() {
         if (status.state === 'completed' || status.state === 'completed_with_warnings') {
           if (!status.result) throw new Error('The job finished without a report. Check History.')
           setAnalysis(status.result)
-          setBackendOnline(true)
-          setActiveTab('quality')
+          handleTabChange('quality')
           return
         }
         await new Promise(resolve => setTimeout(resolve, 800))
@@ -176,8 +155,7 @@ function App() {
       if (controller.signal.aborted) return
       setAnalysis({ ...data, dataset_id: data.dataset_id ?? datasetId })
       setJob(null)
-      setBackendOnline(true)
-      setActiveTab('quality')
+      handleTabChange('quality')
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(err instanceof Error ? err.message : 'Could not load the saved report.')
@@ -254,27 +232,18 @@ function App() {
 
   const hasData = datasetResult !== null
 
-  // ── Landing Page ──────────────────────────────────────────────────────────
-  if (currentView === 'landing') {
-    return (
-      <LandingPage
-        onLaunch={() => setCurrentView('dashboard')}
-        backendOnline={backendOnline}
-        hasData={hasData}
-        activeFileName={activeFileName}
-      />
-    )
-  }
-
   // ── Dashboard ─────────────────────────────────────────────────────────────
   return (
     <DashboardLayout
       onExport={handleExport}
       exporting={exporting}
       activeTab={activeTab}
-      onTabChange={setActiveTab}
+      onTabChange={handleTabChange}
       hasData={hasData}
-      onLanding={() => setCurrentView('landing')}
+      onLanding={() => window.location.assign('/')}
+      username={session.username}
+      onLogout={handleLogout}
+      signingOut={signingOut}
       onReset={handleReset}
       backendOnline={backendOnline}
       activeFileName={activeFileName}
@@ -285,6 +254,12 @@ function App() {
       onDismissError={() => setError(null)}
     >
       <CenterCanvas activeTab={activeTab}>
+        {activeTab === 'overview' && (
+          <WorkspaceOverview username={session.username}
+            activeFile={hasData ? activeFileName : undefined}
+            onNavigate={handleTabChange} onLoad={handleLoadHistoricalDataset}
+            loadingId={historyLoadingId} />
+        )}
         {/* ── TAB 1: UPLOAD ─────────────────────────────────────────── */}
         {activeTab === 'upload' && (
           <div style={{ maxWidth: 720, margin: '0 auto' }}>
@@ -474,35 +449,45 @@ function App() {
         )}
 
         {/* ── TAB 5: ML INSIGHTS ────────────────────────────────────── */}
-        {activeTab === 'ml' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-              <div>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-                  ML Insights
-                </h2>
-                <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                  Anomaly detection and honest forecasting generated by the ML Agent.
-                </p>
+        {(activeTab === 'ml' || hasData) && (
+          <div hidden={activeTab !== 'ml'}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                <div>
+                  <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
+                    ML Insights
+                  </h2>
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                    Explore anomalies and forecasts or build a model for your own outcome.
+                  </p>
+                </div>
+                <span
+                  style={{
+                    fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 99,
+                    background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.25)',
+                    color: '#a78bfa', flexShrink: 0,
+                  }}
+                >
+                  ML Agent
+                </span>
               </div>
-              <span
-                style={{
-                  fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 99,
-                  background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.25)',
-                  color: '#a78bfa', flexShrink: 0,
-                }}
-              >
-                ML Agent
-              </span>
-            </div>
-            <MLInsightsView key={currentDatasetId} backendUrl={BACKEND_URL} disabled={!hasData} hasData={hasData} initialData={analysis?.ml_result} currentDatasetId={currentDatasetId} />
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn-primary" onClick={() => setActiveTab('insights')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                Proceed to Business Summary
-                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                </svg>
-              </button>
+              <MLWorkspace
+                key={currentDatasetId}
+                backendUrl={BACKEND_URL}
+                hasData={hasData}
+                visible={activeTab === 'ml'}
+                initialData={analysis?.ml_result}
+                currentDatasetId={currentDatasetId}
+                columns={analysis?.dataset_summary?.columns ?? []}
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="btn-primary" onClick={() => setActiveTab('insights')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Proceed to Business Summary
+                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -552,7 +537,7 @@ function App() {
         )}
 
         {/* ── Empty / No data state for locked tabs ─────────────────── */}
-        {!hasData && activeTab !== 'upload' && activeTab !== 'history' && (
+        {!hasData && activeTab !== 'overview' && activeTab !== 'upload' && activeTab !== 'history' && (
           <div className="empty-state">
             <div className="empty-state-icon">
               <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ margin: '0 auto', opacity: 0.4 }}>
@@ -571,6 +556,86 @@ function App() {
       </CenterCanvas>
     </DashboardLayout>
   )
+}
+
+function App() {
+  const path = window.location.pathname.replace(/\/$/, '')
+  const params = new URLSearchParams(window.location.search)
+  const isAuth = path === '/login' || path === '/signup'
+  const legacyWorkspace = path === '' && (params.get('view') === 'dashboard' || params.has('tab'))
+  const wantsWorkspace = path === '/workspace' || legacyWorkspace
+  const returnTo = workspacePath(params.get('tab'))
+  const [session, setSession] = useState<AuthSession | null | undefined>(undefined)
+  const [sessionError, setSessionError] = useState(false)
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    getSession(controller.signal).then(current => {
+      if (!controller.signal.aborted) setSession(current)
+    }).catch(() => {
+      if (!controller.signal.aborted) setSessionError(true)
+    })
+    function restorePage(event: PageTransitionEvent) {
+      if (event.persisted) window.location.reload()
+    }
+    window.addEventListener('pageshow', restorePage)
+    return () => {
+      controller.abort()
+      window.removeEventListener('pageshow', restorePage)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isAuth) return
+    const controller = new AbortController()
+    async function checkHealth() {
+      try {
+        const response = await fetch('/health', { signal: controller.signal })
+        if (!controller.signal.aborted) setBackendOnline(response.ok)
+      } catch {
+        if (!controller.signal.aborted) setBackendOnline(false)
+      }
+    }
+    void checkHealth()
+    const interval = window.setInterval(checkHealth, 3000)
+    return () => {
+      controller.abort()
+      window.clearInterval(interval)
+    }
+  }, [isAuth])
+
+  useEffect(() => {
+    if (session === undefined) return
+    if (wantsWorkspace && !session) {
+      const tab = new URL(returnTo, window.location.origin).search
+      window.location.replace('/login' + tab)
+    } else if ((isAuth || legacyWorkspace) && session) {
+      window.location.replace(returnTo)
+    }
+  }, [isAuth, legacyWorkspace, returnTo, session, wantsWorkspace])
+
+  if (wantsWorkspace || isAuth) {
+    if (sessionError) {
+      return <main className="auth-page auth-main"><section className="auth-card">
+        <p role="alert">Could not check your session.</p>
+        <button type="button" className="auth-submit mt-4" onClick={() => window.location.reload()}>Try again</button>
+        <a className="auth-back mt-4 inline-block" href="/">Back to home</a>
+      </section></main>
+    }
+    if (session === undefined || (wantsWorkspace && !session) || ((isAuth || legacyWorkspace) && session)) {
+      return <main className="auth-page auth-main"><p role="status">Checking your session…</p></main>
+    }
+    if (isAuth) {
+      return <AuthPage mode={path === '/signup' ? 'signup' : 'login'} returnTo={returnTo} />
+    }
+    if (session) return <AnalyticsApp session={session} backendOnline={backendOnline} />
+  }
+  return <LandingPage
+    signedIn={Boolean(session)}
+    backendOnline={backendOnline}
+    onLaunch={() => window.location.assign(session ? '/workspace' : '/login')}
+  />
 }
 
 export default App

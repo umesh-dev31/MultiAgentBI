@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 
-type ActiveTab = 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
+type ActiveTab = 'overview' | 'upload' | 'quality' | 'eda' | 'sql' | 'ml' | 'insights' | 'history'
 
 interface CenterCanvasProps {
   activeTab: ActiveTab

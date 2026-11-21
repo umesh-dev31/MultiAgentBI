@@ -19,16 +19,40 @@ logger = logging.getLogger('agentinsight')
 def log_event(event,job_id,dataset_id=None,**fields):
     logger.info(json.dumps(dict(event=event,job_id=job_id,dataset_id=dataset_id,**fields)))
 
+def execute_model_job(sessions, repository, job_id, dataset_id, workspace_id, options):
+    from model_builder import train_model
+
+    repository.require_owned(dataset_id, workspace_id)
+    context = repository.context(dataset_id)
+    try:
+        report = train_model(context.frame, **options)
+    except ValueError as error:
+        with sessions.begin() as session:
+            job = session.get(Job, job_id)
+            job.state, job.finished_at = 'failed', datetime.utcnow()
+            job.error = {'code': 'MODEL_INVALID', 'message': str(error)}
+        return
+    with sessions.begin() as session:
+        job = session.get(Job, job_id)
+        job.stages = {'model_report': report}
+        job.state, job.finished_at = 'completed', datetime.utcnow()
+
+
 def execute_job(settings,job_id):
     """Process entry point: opens its own engine and never inherits request sessions."""
     logging.basicConfig(level=logging.INFO,format='%(message)s')
     engine = make_engine(settings.database_url)
     sessions = sessionmaker(bind=engine,expire_on_commit=False)
     repository = DatasetRepository(sessions)
+    mode = None
     try:
         with sessions() as session:
             job = session.get(Job,job_id)
             source,options,mode = job.source_path,job.options,job.mode
+            owner, model_dataset_id = job.browser_session, job.dataset_id
+        if mode == 'model':
+            execute_model_job(sessions, repository, job_id, model_dataset_id, owner, options)
+            return
         progress_lock = threading.RLock()
         def progress(node,status,**details):
             # LangGraph's parallel branches must not overwrite each other's JSON stage map.
@@ -68,7 +92,7 @@ def execute_job(settings,job_id):
         with sessions.begin() as session:
             job = session.get(Job,job_id)
             job.state,job.finished_at = 'failed',datetime.utcnow()
-            job.error = {'code':code,'message':'Storage unavailable.' if code=='STORAGE_UNAVAILABLE' else 'Dataset cannot be processed with these import options.' if code=='INVALID_INPUT' else 'Required pipeline stage failed.'}
+            job.error = {'code':code,'message':'Storage unavailable.' if code=='STORAGE_UNAVAILABLE' else 'Dataset cannot be processed with these import options.' if code=='INVALID_INPUT' else 'Model training failed.' if mode == 'model' else 'Required pipeline stage failed.'}
         log_event('job_failed',job_id,code=code)
     finally:
         engine.dispose()
