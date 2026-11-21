@@ -1,183 +1,195 @@
-# AgentInsight AI — Autonomous Multi-Agent Business Intelligence Platform
+# AgentInsight AI - Autonomous Multi-Agent Business Intelligence Platform
 
-> Backend repair: the current backend preserves source data by default, uses explicit dataset contexts and durable supervised jobs, and supports one persistent local server. See [backend operation and API contracts](backend/README.md) for authoritative current behavior. The older feature descriptions below describe the original UI/demo; automatic imputation, deduplication and outlier exclusion are no longer defaults.
-
-**Upload a messy CSV → get instant AI-powered data cleaning, statistical analysis, interactive visualizations, executive recommendations, natural-language SQL queries, ML anomaly detection, persistent history, and RAG-powered knowledge retrieval.**
-
-</div>
+AgentInsight AI is an autonomous, full-stack multi-agent platform designed to transform raw, noisy business datasets into clean, actionable intelligence. Orchestrated through specialized agents, the platform performs non-destructive data cleaning, statistical analysis, interactive visualization, executive recommendations, natural-language SQL queries, machine learning anomaly detection, predictive model building, and RAG-powered knowledge retrieval over analytical audits.
 
 ---
 
-## Overview
+## Architecture Overview
 
-AgentInsight AI is an autonomous, full-stack multi-agent platform that transforms raw, messy business datasets into clean, actionable intelligence. Orchestrated by **LangGraph**, each agent is a specialized Python module executing bounded tasks with strict validation guarantees.
-
-The platform includes **SQLAlchemy-backed persistent storage** (PostgreSQL-compatible, SQLite local demo) for historical runs and a **RAG Knowledge Agent** that indexes audit logs and analytical summaries for instant, grounded natural-language answers with source citations.
-
-### Multi-Agent Architecture
+The platform uses a modular multi-agent architecture where each agent executes bounded responsibilities with strict validation and audit tracking guarantees:
 
 ```
-                               ┌─────────────────────────┐
-                               │     Raw CSV Upload      │
-                               └────────────┬────────────┘
-                                            │
-                                            ▼
-                               ┌─────────────────────────┐
-                               │      Data Agent         │
-                               │  Cleaning & Auto-Fixes  │
-                               └────────────┬────────────┘
-                                            │
-                                            ▼
-                               ┌─────────────────────────┐
-                               │    Validation Agent     │
-                               │ Flags Bad Rows & Errors │
-                               └────────────┬────────────┘
-                                            │
-                        ┌───────────────────┴───────────────────┐
-                        │                                       │
-                        ▼                                       ▼
-             ┌─────────────────────┐                 ┌─────────────────────┐
-             │      EDA Agent      │                 │      ML Agent       │
-             │ Stats, Trends, Corr │                 │ Anomaly Detection   │
-             └──────────┬──────────┘                 │ Linear Forecasting  │
-                        │                            └──────────┬──────────┘
-                        │                                       │
-                        └───────────────────┬───────────────────┘
-                                            │
-                                            ▼
-                               ┌─────────────────────────┐
-                               │   Visualization Agent   │
-                               │   Smart Chart Schemas   │
-                               └────────────┬────────────┘
-                                            │
-                                            ▼
-                               ┌─────────────────────────┐
-                               │      Insight Agent      │
-                               │ Executive Recommendations│
-                               └────────────┬────────────┘
-                                            │
-                                            ▼
-                               ┌─────────────────────────┐
-                               │   Persistence & RAG     │
-                               │  SQLAlchemy + TF-IDF    │
-                               └─────────────────────────┘
+                      +-----------------------------+
+                      |   Raw File (.csv / .xlsx)   |
+                      +--------------+--------------+
+                                     |
+                                     v
+                      +-----------------------------+
+                      |         Data Agent          |
+                      | Cleaning, Parsing & Audit   |
+                      +--------------+--------------+
+                                     |
+                                     v
+                      +-----------------------------+
+                      |      Validation Agent       |
+                      | Business Rules & Isolation  |
+                      +--------------+--------------+
+                                     |
+                +--------------------+--------------------+
+                |                                         |
+                v                                         v
++-------------------------------+         +-------------------------------+
+|           EDA Agent           |         |           ML Agent            |
+| Summary Stats, Corr, Trends   |         | Isolation Forest & Forecast   |
++---------------+---------------+         +---------------+---------------+
+                |                                         |
+                +--------------------+--------------------+
+                                     |
+                                     v
+                      +-----------------------------+
+                      |     Visualization Agent     |
+                      | Smart Chart Configurations  |
+                      +--------------+--------------+
+                                     |
+                                     v
+                      +-----------------------------+
+                      |        Insight Agent        |
+                      | Executive Synthesis & Risks |
+                      +--------------+--------------+
+                                     |
+                                     v
+                      +-----------------------------+
+                      |  SQL & Knowledge (RAG)      |
+                      | SQLGlot Engine + TF-IDF RAG |
+                      +--------------+--------------+
+                                     |
+                                     v
+                      +-----------------------------+
+                      | Persistent Storage (SQLite) |
+                      | SQLAlchemy Datasets & Runs  |
+                      +-----------------------------+
 ```
 
 ---
 
-## Features & Agents
+## Agent Specifications and Capabilities
 
-### 1. Data Agent — Autonomous Data Cleaning & Normalization
-- Detects and strips currency symbols (`$`, `€`, `£`, `₹`), thousands commas, and whitespace.
-- Normalizes casing on low-cardinality categorical columns while preserving customer names and free text.
-- Parses complex/ambiguous date formats (DD/MM/YYYY, ISO-8601, regional strings).
-- Performs intelligent imputation (median for numeric, mode for categorical) exclusively on genuine nulls.
+### 1. Data Agent (Ingestion, Audit, and Normalization)
+- Ingests raw CSV and Excel (`.xlsx`, `.xls`) files with UTF-8 BOM detection and blank-line preservation.
+- Strips multi-currency symbols ($, EUR, GBP, JPY, INR), commas, and extraneous spacing while parsing numeric values.
+- Identifier column protection: Retains string formats for IDs (e.g., `ORD-001`, `SKU-99`, postal codes) to prevent loss of precision or accidental conversion to NaN.
+- Casing normalization on low-cardinality categorical attributes while protecting free-text columns.
+- Explicit non-destructive imputation: Fills true missing values using median (numeric) or mode (categorical) only when requested, recording every modification with original line indices in the audit trail.
 
-### 2. Validation Agent — Strict Quality Assurance & Isolation
-- Evaluates data against strict business rules (flags negative prices/quantities, zero values, and calendar impossibilities like Feb 30).
-- Isolates problem rows into a pristine `AuditReport` while ensuring downstream agents only compute on certified, uncontaminated data.
-- Generates detailed issue logs: row index, column name, raw value, and human-readable reason.
+### 2. Validation Agent (Quality Assurance and Quarantine)
+- Evaluates raw records against business logic: flags negative prices, impossible quantities, and calendar errors (e.g., February 30).
+- Isolates problematic records into an `AuditReport` while supplying downstream analytical agents with uncontaminated validation subsets.
+- Tracks source line numbers so users can map every identified issue back to original input spreadsheets.
 
-### 3. EDA Agent — Exploratory Data Analysis
-- Computes comprehensive descriptive statistics on validated subsets (mean, median, standard deviation, quartiles, min/max).
-- Calculates categorical distributions with top-value breakdowns.
-- Computes a Pearson correlation matrix across numeric features.
-- Aggregates monthly revenue and volume trends for temporal analysis.
+### 3. EDA Agent (Exploratory Data Analysis)
+- Descriptive statistics across all numeric attributes (mean, median, standard deviation, quartiles, min/max).
+- Categorical frequency distributions with percentage breakdowns.
+- Pearson correlation matrix across numeric features.
+- Monthly temporal aggregation for revenue and volume trends across calendar intervals.
 
-### 4. ML Agent — Machine Learning Anomaly Detection & Forecasting
-- **Per-Category Normalized Isolation Forest**: Detects statistical anomalies relative to category peers rather than global distributions, avoiding false positives on inherently high-value items.
-- Provides plain-English explanations for every flagged anomaly with percentage deviations.
-- **Trend Forecasting**: Linear regression modeling on historical monthly periods with dynamic confidence levels (`high`, `medium`, `insufficient`).
+### 4. ML Agent (Anomaly Detection and Trend Forecasting)
+- Per-category normalized Isolation Forest: Evaluates statistical deviations within category peers rather than global distributions, avoiding false alarms on high-value categories.
+- Plain-text explanations for flagged anomalies with percentage variance metrics.
+- Linear regression modeling across historical periods with dynamic confidence levels (`high`, `medium`, `insufficient`).
 
-### 5. Visualization Agent — Autonomous Chart Generation
-- Translates statistical distributions into recommended charts (bar, line, scatter, pie, heatmap).
-- Emits schema-compliant chart configurations rendered natively with responsive SVG.
+### 5. Model Builder (Workspace Training and Colab Export)
+- Workspace Model Training: In-browser model configuration for classification and regression tasks on tabular datasets with train/test splits and evaluation metrics.
+- Colab Export Bundle: Generates a self-contained ZIP file containing an automated Jupyter notebook and extracted training CSV for execution in Google Colab.
 
-### 6. Insight Agent — Executive Synthesis & Strategic Recommendations
-- Synthesizes findings across EDA, ML, and Validation into an Executive Summary.
-- Delivers prioritized business recommendations, operational risks, and growth opportunities.
+### 6. Visualization Agent (Chart Synthesis)
+- Automatically recommends visual representations based on data shapes (distribution bars, trend lines, correlation heatmaps).
+- Emits declarative chart specifications rendered natively through responsive SVG components.
 
-### 7. SQL Agent — Text-to-SQL with In-Memory Execution
-- Translates natural-language questions (e.g., *"What is the total sales amount per month?"*) into safe, read-only SQLite `SELECT` queries.
-- Powered by the **Groq LLM API** with automatic self-correction retries.
-- Enforces strict security: blocks `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, and `CREATE`.
+### 7. Insight Agent (Executive Synthesis)
+- Aggregates findings from EDA, ML anomalies, and data validation into an Executive Summary.
+- Delivers prioritized recommendations, operational risks, and growth opportunities.
 
-### 8. RAG Knowledge Agent — Semantic Question Answering over Analyses
-- Indexes flagged audit issues and analytical summaries into a structured knowledge base.
-- Uses **scikit-learn TF-IDF vectorization + cosine similarity** with exact row-number match boosting.
-- Answers questions like *"Why was row 13 flagged?"* or *"What data quality issues were found?"*.
-- Dual retrieval scope: query within the **Current Dataset** or across **All Historical Uploads**.
-- Displays expandable evidence drawer with similarity scores, chunk types, and citations.
+### 8. SQL Agent (Text-to-SQL Execution)
+- Converts natural-language queries into read-only SQLite `SELECT` statements executed against in-memory validated tables.
+- Security-first parsing: Validates AST via SQLGlot to strictly prohibit mutating statements (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `ATTACH`).
+- Self-correction retry logic on syntax errors with deterministic fallbacks for standard schema queries.
 
-### 9. Persistent Storage & History
-- Built with **SQLAlchemy ORM** connected to a SQLite database (`backend/data/agentinsight.db`), fully architected for drop-in PostgreSQL migration.
-- Persists datasets, complete pipeline runs (EDA, ML, Insights, Visualizations, Cleaned & Validated Data), audit issues, and RAG knowledge chunks.
-- Dedicated **History Tab** allows users to review past uploads and restore any historical session into the live analytical workspace with 1 click.
+### 9. Knowledge Agent (TF-IDF RAG Retrieval)
+- Indexes data quality audit logs and analytical summaries into a structured knowledge base.
+- Uses scikit-learn TF-IDF vectorization and cosine similarity with row-number boosting.
+- Dual retrieval modes: Query within the current active dataset or across historical uploads.
+- Evidence drawer provides similarity scores, chunk types, and line citations.
+
+### 10. Job Supervisor and Async Queue
+- SQLite-backed asynchronous task queue (`/api/jobs`) with supervisor thread pool.
+- Handles heavy file processing without blocking the HTTP event loop.
+- Supports frontend heartbeat polling with status endpoints and failure recovery.
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology | Description |
-|-------|-----------|-------------|
-| **Pipeline Orchestration** | LangGraph | State-machine workflow directing data and agent handoffs |
-| **Backend Framework** | FastAPI + Uvicorn | High-performance asynchronous REST API |
-| **Data Processing** | pandas, NumPy | High-speed data manipulation and cleaning |
-| **Machine Learning & RAG** | scikit-learn | IsolationForest, LinearRegression, TfidfVectorizer, cosine_similarity |
-| **Database & ORM** | SQLAlchemy | ORM layer with SQLite (PostgreSQL compatible) |
-| **LLM & Text-to-SQL** | Groq API | Ultra-low-latency LLM inference |
-| **Frontend Framework** | React 19 + TypeScript + Vite | Type-safe, reactive single-page dashboard |
-| **Styling & Theme** | Vanilla CSS + Tailwind v4 | Glassmorphism, CSS design tokens, seamless Dark & Light mode |
+| Layer | Technology | Purpose |
+|---|---|---|
+| Workflow Orchestration | LangGraph | State machine and multi-agent coordination |
+| Backend Framework | FastAPI + Uvicorn | Asynchronous REST API and WebSocket/SSE support |
+| Data Processing | pandas, NumPy | High-performance tabular transformation and audit tracking |
+| Machine Learning & RAG | scikit-learn | Isolation Forest, Linear Regression, TF-IDF, Cosine Similarity |
+| SQL Engine & Validation | SQLGlot, SQLite | AST safety verification and read-only query execution |
+| Database & ORM | SQLAlchemy | Multi-tenant schema, dataset snapshots, and audit tables |
+| LLM Integration | Groq API | Low-latency inference for Text-to-SQL and business Q&A |
+| Frontend Framework | React 19 + TypeScript + Vite | Type-safe single-page reactive dashboard |
+| Styling & Theming | Tailwind CSS + CSS Tokens | Responsive layout with persistent Dark and Light mode |
 
 ---
 
-## Project Structure
+## Project Directory Structure
 
 ```
 insight/
-├── backend/
-│   ├── agents/
-│   │   ├── data_agent.py           # Ingestion, cleaning & quality analysis
-│   │   ├── eda_agent.py            # Statistical analysis & correlation
-│   │   ├── sql_agent.py            # Natural language to SQLite query execution
-│   │   ├── ml_agent.py             # IsolationForest & trend regression
-│   │   ├── visualization_agent.py  # Autonomous chart configuration
-│   │   ├── insight_agent.py        # Executive summaries & recommendations
-│   │   └── knowledge_agent.py      # TF-IDF RAG agent over audit & insights
-│   ├── db/
-│   │   ├── database.py             # SQLAlchemy session & SQLite engine setup
-│   │   └── models.py               # Dataset, PipelineRun, AuditIssue, KnowledgeChunk
-│   ├── orchestrator/
-│   │   ├── graph.py                # LangGraph pipeline state graph & persistence
-│   │   └── state.py                # TypedDict state definitions
-│   ├── data/
-│   │   └── .gitkeep                # Preserves database directory (DB ignored in git)
-│   ├── tests/                      # Pytest unit & regression tests
-│   ├── main.py                     # FastAPI routes, CORS, session state & lifecycle
-│   └── requirements.txt
-│
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── dashboard/          # Canvas, header, sidebar & layout
-│   │   │   ├── upload/             # File dropzone & upload pipeline
-│   │   │   ├── dataQuality/        # Audit report & issue inspection
-│   │   │   ├── preview/            # Cleaned data table preview
-│   │   │   ├── eda/                # Summary stats, charts & correlation
-│   │   │   ├── ml/                 # Anomaly cards & regression trends
-│   │   │   ├── sql/                # SQL Query & RAG Question dual-mode views
-│   │   │   ├── history/            # Historical dataset viewer & 1-click restore
-│   │   │   └── landing/            # Silk canvas visual presentation
-│   │   ├── context/                # ThemeContext (Dark / Light switcher)
-│   │   ├── types/                  # TypeScript data contracts & API interfaces
-│   │   ├── App.tsx                 # Routing, global workspace state
-│   │   └── index.css               # Design tokens, dark mode bridge & utilities
-│   ├── package.json
-│   └── vite.config.ts
-│
-├── brutal_data_cleaning_test.csv   # Comprehensive test dataset with edge cases
-├── dev.bat                         # Launches frontend + backend concurrently
-└── README.md
+|-- backend/
+|   |-- agents/
+|   |   |-- data_agent.py           # Ingestion, parsing, and data quality auditing
+|   |   |-- eda_agent.py            # Descriptive statistics and correlation analysis
+|   |   |-- insight_agent.py        # Executive summary and recommendation engine
+|   |   |-- knowledge_agent.py      # TF-IDF RAG over audit logs and summaries
+|   |   |-- ml_agent.py             # Isolation Forest anomaly detection and forecasting
+|   |   |-- sql_agent.py            # Natural language to SQLite query execution
+|   |   |-- validation.py           # Business rule checks and quarantined subsets
+|   |   `-- visualization_agent.py  # Declarative chart configuration generator
+|   |-- db/
+|   |   |-- database.py             # Database engine setup and session factory
+|   |   `-- models.py               # SQLAlchemy ORM models (Jobs, Datasets, Audits)
+|   |-- orchestrator/
+|   |   |-- graph.py                # LangGraph pipeline definition
+|   |   `-- state.py                # Pipeline state definitions
+|   |-- tests/                      # Pytest unit and regression test suite
+|   |-- auth.py                     # Session-based authentication and user workspaces
+|   |-- config.py                   # Environment configuration and validation thresholds
+|   |-- contracts.py                # Pydantic schemas and serialization models
+|   |-- jobs.py                     # Job queue manager and worker process pool
+|   |-- main.py                     # FastAPI application routes and lifecycle
+|   |-- model_builder.py            # Model training and algorithmic recommendation
+|   |-- model_export.py             # Colab export bundle packaging
+|   |-- providers.py                # LLM client abstractions
+|   |-- repository.py               # Dataset persistence and snapshot management
+|   |-- requirements.txt            # Python dependencies
+|   `-- run.bat                     # Windows backend execution script
+|
+|-- frontend/
+|   |-- src/
+|   |   |-- components/
+|   |   |   |-- dashboard/          # Layout, header, canvas, and workspace navigation
+|   |   |   |-- eda/                # Statistics tables, trends, and correlation views
+|   |   |   |-- history/            # Historical snapshot viewer and restore
+|   |   |   |-- insights/           # Executive summaries and risk breakdown
+|   |   |   |-- landing/            # Landing page and platform presentation
+|   |   |   |-- ml/                 # Anomaly cards, regressions, and Model Builder
+|   |   |   |-- sql/                # SQL query editor and RAG knowledge assistant
+|   |   |   `-- upload/             # File dropzone and stage progress tracker
+|   |   |-- context/                # ThemeContext for Light and Dark modes
+|   |   |-- types/                  # TypeScript interface definitions
+|   |   |-- api.ts                  # Centralized HTTP client wrapper
+|   |   |-- auth.ts                 # Client-side authentication utilities
+|   |   |-- App.tsx                 # Root application component and view router
+|   |   `-- main.tsx                # React 19 entry point
+|   |-- package.json
+|   `-- vite.config.ts
+|
+|-- dev.bat                         # Unified startup script for frontend and backend
+|-- run_backend.bat                 # Root helper script to launch backend
+|-- setup_backend.bat               # Environment initialization script
+`-- README.md
 ```
 
 ---
@@ -185,95 +197,133 @@ insight/
 ## Getting Started
 
 ### Prerequisites
-- **Python 3.11+**
-- **Node.js 18+** & **npm**
-- A free **[Groq API Key](https://console.groq.com/)**
+- Python 3.11 or higher
+- Node.js 18 or higher (with npm)
+- Groq API Key (Optional for basic deterministic tasks; required for full natural-language SQL and open-ended Q&A)
 
-### 1. Clone the Repository
+---
+
+### Step 1: Clone the Repository
 ```bash
 git clone https://github.com/umesh-dev31/MultiAgentBI.git
 cd MultiAgentBI
 ```
 
-### 2. Backend Setup
+---
+
+### Step 2: Backend Setup
+
+1. Create and activate a Python virtual environment:
+   ```bash
+   # Windows (PowerShell)
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+
+   # macOS / Linux
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r backend/requirements.txt
+   ```
+
+3. Configure environment variables:
+   ```bash
+   # Windows
+   copy backend\.env.example backend\.env
+
+   # macOS / Linux
+   cp backend/.env.example backend/.env
+   ```
+
+4. Add your API key to `backend/.env`:
+   ```env
+   GROQ_API_KEY=your_groq_api_key_here
+   GROQ_MODEL=openai/gpt-oss-120b
+   ```
+
+---
+
+### Step 3: Frontend Setup
+
 ```bash
-cd backend
-
-# Create and activate virtual environment
-python -m venv venv
-
-# Windows
-.\venv\Scripts\activate
-
-# macOS / Linux
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment variables
-copy .env.example .env   # On Windows
-cp .env.example .env     # On macOS/Linux
-```
-
-Edit `backend/.env`:
-```env
-GROQ_API_KEY=gsk_your_groq_api_key_here
-GROQ_MODEL=openai/gpt-oss-120b
-```
-
-### 3. Frontend Setup
-```bash
-cd ../frontend
-npm install
-```
-
-### 4. Launch the Platform
-
-**Option A — Unified Windows Script:**
-```bash
-# From project root
-.\dev.bat
-```
-
-**Option B — Independent Terminals:**
-```bash
-# Terminal 1: Backend
-cd backend
-.\run.bat    # or: uvicorn main:app --reload --port 8000
-
-# Terminal 2: Frontend
 cd frontend
-npm run dev  # Vite starts on http://localhost:5173
+npm install
+cd ..
 ```
 
-Navigate to **http://localhost:5173** in your browser.
-
 ---
 
-## API Endpoints
+### Step 4: Run the Application
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check & system status |
-| `POST` | `/api/upload` | Ingests CSV, runs full LangGraph pipeline, persists run, returns analysis |
-| `POST` | `/api/query` | Body: `{"question": "..."}` → NL-to-SQL execution against SQLite |
-| `POST` | `/api/knowledge/ask` | Body: `{"question": "...", "scope": "current"\|"all_history", "dataset_id": 1}` → RAG response with retrieved chunks |
-| `GET` | `/api/history` | Fetches list of all historical pipeline runs |
-| `GET` | `/api/history/{dataset_id}` | Restores full pipeline run, state, and in-memory SQLite table |
-| `GET` | `/api/suggested-questions` | Generates schema-tailored business questions |
+#### Option A: Unified Windows Launcher
+From the project root, run:
+```bat
+dev.bat
+```
+This script launches both the FastAPI backend (port 8000) and the Vite frontend (port 5173).
 
----
+#### Option B: Individual Terminals
 
-## Testing
-
-Run backend unit and integration tests:
+Terminal 1 (Backend):
 ```bash
 cd backend
-pytest tests/
+.\run.bat
+# or directly:
+# uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Run frontend production build verification:
+Terminal 2 (Frontend):
+```bash
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:5173` in your browser.
+
+---
+
+## API Reference
+
+### Authentication and Session Management
+- `POST /api/auth/register` - Create a new user account and associated personal workspace.
+- `POST /api/auth/login` - Authenticate user credentials and establish a secure HTTP-only session.
+- `GET /api/auth/session` - Return the current signed-in user and workspace metadata.
+- `POST /api/auth/logout` - Revoke the active session.
+
+### Asynchronous Job Processing
+- `POST /api/jobs` - Submit a dataset file for processing; returns `202 Accepted` with a `job_id`.
+- `GET /api/jobs/{job_id}` - Poll processing progress, stage status, and execution logs.
+
+### Analysis and Querying
+- `POST /api/datasets/{dataset_id}/analysis/{kind}` - Trigger on-demand analysis (`eda`, `ml-insights`, `insights`).
+- `POST /api/query` - Execute natural-language questions translated to read-only SQLite SQL.
+- `POST /api/knowledge/ask` - Submit questions to the RAG Knowledge Agent with source citations.
+- `GET /api/knowledge/suggested-questions` - Retrieve schema-grounded business questions.
+
+### Machine Learning and Model Builder
+- `POST /api/datasets/{dataset_id}/model/inspect` - Evaluate feature eligibility and recommend models.
+- `POST /api/datasets/{dataset_id}/model/train` - Submit an in-workspace model training job.
+- `POST /api/datasets/{dataset_id}/model/export` - Download a runnable Google Colab ZIP package.
+
+### History and Exports
+- `GET /api/history` - List all historical dataset runs in the workspace.
+- `GET /api/history/{dataset_id}` - Restore an analytical run snapshot into the workspace.
+- `GET /api/export/{dataset_id}?format=csv|json|html` - Export sanitized data, analysis JSON, or printable HTML reports.
+
+---
+
+## Testing and Quality Verification
+
+### Run Backend Tests
+```bash
+# Execute pytest with temp directory allocation
+pytest backend/tests/ --basetemp=./tmp
+```
+
+### Run Frontend Production Build
 ```bash
 cd frontend
 npm run build
@@ -281,60 +331,15 @@ npm run build
 
 ---
 
-## Security & Data Integrity
+## Security and Reliability
 
-- **Read-Only SQL Execution**: SQL Agent generates and executes `SELECT` statements only. All mutating DDL and DML statements (`DROP`, `DELETE`, `INSERT`, `UPDATE`, `ALTER`, `TRUNCATE`) are blocked by parser-level validation.
-- **Outlier Isolation**: Statistical outliers (>3× IQR) and business-invalid rows (negative/zero prices) are segregated into audit reports so statistical models and SQL queries run on uncontaminated data.
-- **Credential Protection**: API keys are strictly parsed from local `.env` files and excluded from version control.
-- **Database Decoupling**: Persistent storage utilizes SQLAlchemy's ORM abstraction, allowing seamless transition from local SQLite to enterprise PostgreSQL with a connection string change.
-
----
-
-## Author
-
-**Umesh** — [@umesh-dev31](https://github.com/umesh-dev31)
+- AST SQL Validation: SQL queries generated by the LLM undergo Abstract Syntax Tree validation via SQLGlot before execution. Any non-SELECT syntax is rejected immediately.
+- Non-Destructive Data Preservation: Raw records are preserved without silent dropping. Issues are logged with original line numbers for full transparency.
+- Session Isolation: Each account receives isolated workspace storage to prevent cross-tenant data access.
+- Local Storage Decoupling: Uses SQLAlchemy ORM to allow seamless migration between local SQLite and production PostgreSQL.
 
 ---
 
 ## License
 
-MIT License — see the [LICENSE](LICENSE) file for details.
-
-
-## Review fixes and additional inputs / exports
-
-- All analysis agents now use the same idempotent validation function. Zero-value metrics remain included, negative/null metrics and extreme outliers are excluded consistently. Original spreadsheet row numbers survive duplicate removal and history restoration.
-- Forecast fitting uses actual calendar-month distances, including gaps in uploaded history.
-- SQL execution also enables SQLite read-only mode. Simple revenue-by-category and top-customer questions work offline; other natural-language queries still use the configured LLM.
-- A fresh `/api/upload` clears previous pipeline state. Unknown dataset IDs return 404 instead of silently querying a different dataset.
-- The dashboard includes **Export results** for a full cleaned CSV, full analysis JSON, and a printable HTML report (use the browser's Save as PDF option). This uses persisted full records, not the preview.
-- **Import from a database** reads tables from an operator-configured `ANALYTICS_DATABASE_URL` in `backend/.env`. Supported URL schemes: `postgresql+psycopg2://`, `mysql+pymysql://`, and `sqlite:///`. Use a read-only database account. The selected table is passed through the same upload pipeline; imports over 100,000 rows are rejected rather than silently truncated. Database credentials are never sent to the frontend.
-- Dashboard panels adapt to narrow windows; history timestamps stored as UTC display in the browser's local timezone. Landing-page components were not changed.
-
-### Windows startup and verification
-
-A separate `backend/venv-review` environment is preferred by the launch scripts; existing environments are retained. On a new machine with Python 3.12, run `setup_backend.bat`, then `dev.bat`. `backend/run.bat` also works from any working directory and sets UTF-8 console encoding so telemetry cannot break uploads on Windows.
-
-```powershell
-cd backend
-$env:PYTHON_DOTENV_DISABLED = '1'
-.\venv-review\Scripts\python.exe -m pytest tests -q
-```
-
-Tests use temporary databases and disable LLM calls in regression fixtures. SQLite source import is tested; live PostgreSQL/MySQL connections and provider-backed LLM responses require configured services. The PPT's XGBoost, Transformers, Matplotlib/Seaborn references remain proposed alternatives; the current implementation uses IsolationForest, NumPy linear fitting, TF-IDF retrieval, and frontend chart rendering.
-
-### Accounts and workspaces
-
-The public landing page lives at `/`. Create an account at `/signup` or sign in at `/login`. Each account gets one personal workspace at `/workspace`. Use the workspace header to sign out.
-
-The backend stores accounts and revocable sessions in `auth.db` under `INSIGHT_DATA_DIR`, alongside the default analytics database and uploads. Keep that directory on persistent storage. Serve the frontend and API on the same origin through the development proxy or a reverse proxy. For HTTPS deployments where the backend receives plain HTTP from the proxy, set `INSIGHT_SECURE_COOKIE=1`.
-
-Uploads from before account support are not assigned to new accounts. Reupload the original files from your workspace to use them. The optional `ANALYTICS_DATABASE_URL` is an operator-configured shared source accessible to signed-in accounts when enabled. Leave it unset if it contains data that should not be shared.
-
-### Build a model
-
-Open a dataset in your workspace, then go to **ML Insights → Build a Model**. Select the recorded outcome and the input columns that would be available when making a prediction. AgentInsight checks eligibility and recommends an algorithm based on the task and dataset. You can choose a different supported algorithm.
-
-**Train in workspace** runs eligible small jobs in the existing background queue and shows held-out metrics, a baseline, and charts. **Export for Colab** downloads a ZIP containing a notebook and a CSV with the selected columns. Extract the ZIP, open the notebook in Colab, run all cells, and upload the CSV at the prompt. Colab runs on its own resources and quotas. Workspace data stays in AgentInsight until you download and upload it yourself.
-
-Both training paths fit preprocessing on the training split and evaluate on held-out rows. This version covers numeric and categorical outcomes using ordinary tabular data. For data where rows are related by time, customer, or another group, a random row split may give optimistic results. Time-based and group-based evaluation are outside this version.
+This project is licensed under the MIT License. See the LICENSE file for details.
