@@ -1,3 +1,14 @@
+"""
+SQL Agent (Autonomous Text-to-SQL)
+----------------------------------
+Ye agent user ke natural language questions ko safe SQLite SELECT queries me convert karta hai.
+
+Key Features:
+1. Deterministic Fast-Path: Common questions (jaise 'show me 10 rows', 'total rows') ko bina LLM ke instantly answer karta hai.
+2. Strict SQL Safety: Modifying queries (DROP, INSERT, UPDATE, DELETE, ALTER) ko strictly block karta hai using sqlglot AST parsing.
+3. In-Memory Execution: Cleaned data ko memory SQLite table ('orders') me load karke safe read-only authorizer ke sath execute karta hai.
+4. Auto Self-Correction: Agar pehli baar me SQL query fail hoti hai, to LLM ko error dikha kar 1 retry attempt karta hai.
+"""
 import os
 import re
 import sqlite3
@@ -6,15 +17,10 @@ import pandas as pd
 from agents.validation import validated_subset
 from dotenv import load_dotenv
 
-# Load environment variables from .env
 load_dotenv()
 
 class SQLAgent:
-    """Standalone SQL Agent that translates natural language questions into valid,
-    safe SQLite SELECT queries, executes them against an in-memory validated database,
-    and returns tabular results with single-attempt error retry.
-    """
-
+    # Strictly prohibited keywords — data modification allowed nahi hai
     FORBIDDEN_KEYWORDS = [
         "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",
         "ATTACH", "DETACH", "CREATE", "REPLACE", "EXEC", "EXECUTE",
@@ -34,10 +40,15 @@ class SQLAgent:
         self.anthropic_model = anthropic_model or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 
     def _filter_validated_subset(self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+        """Safe DataFrame copy return karta hai."""
         return validated_subset(df, quality_report)
 
     def _extract_schema(self, df: pd.DataFrame) -> str:
-        """Extracts table schema with column names, data types, and sample distinct values."""
+        """
+        LLM ke liye database schema string banata hai.
+        Har column ka name, data type aur 3 sample values include karta hai
+        taaki LLM sahi column names use kare.
+        """
         schema_lines = ["Table: orders", "Columns:"]
         for col in df.columns:
             dtype = str(df[col].dtype)
@@ -47,27 +58,30 @@ class SQLAgent:
         return "\n".join(schema_lines)
 
     def _clean_sql(self, raw_output: str) -> str:
-        """Removes markdown code fences, comments, thought tags, and trailing whitespace from LLM output."""
+        """
+        LLM ke output me se markdown fences (```sql ... ```),
+        <think> tags aur unnecessary comments hata kar pure SQL string nikaalta hai.
+        """
         if not raw_output:
             return ""
         text = raw_output.strip()
-        # Remove <think>...</think> tags if present
+        # Reasoning models ke <think> tags hatao
         text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
-        # Extract content inside ```sql ... ``` or ``` ... ```
+        # Markdown code fence me se SQL extract karo
         match = re.search(r"```(?:sql)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
         if match:
             text = match.group(1).strip()
-        # Remove any single-line comments (-- ...)
-        lines = []
-        for line in text.splitlines():
-            clean_l = line.strip()
-            if clean_l:
-                lines.append(clean_l)
+        # Lines clean karo aur trailing semicolon hatao
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
         cleaned = " ".join(lines).strip()
-        # Ensure trailing semicolon is cleaned
         return cleaned.rstrip(";")
 
     def _validate_sql_safety(self, sql):
+        """
+        SQLGlot parser use karke query ki AST (Abstract Syntax Tree) check karta hai:
+        - Sirf 1 single read-only SELECT / UNION query allowed hai.
+        - Koi bhi destructive command (INSERT, UPDATE, DELETE, DROP, CREATE) milte hi query reject hoti hai.
+        """
         try:
             import sqlglot
             from sqlglot import exp
@@ -82,74 +96,107 @@ class SQLAgent:
             return False, 'Invalid or unsupported SQL.'
 
     def _call_llm(self, prompt: str, system_prompt: str) -> str:
+        """Providers module ke through LLM call karta hai."""
         from providers import complete
         return complete(self, prompt, system_prompt)
 
     def _match_deterministic_query(self, question: str, df: pd.DataFrame) -> Optional[str]:
-        """Detects standard schema-agnostic or common user inquiries to generate guaranteed valid SQL."""
-        q = question.strip().lower()
-        q = q.strip(' ?.!')
+        """
+        Common questions ke liye Fast-Path:
+        Agar user standard question puche (e.g. 'show me first 10 rows', 'how many records'),
+        to bina LLM call kiye instant accurate SQL generate karta hai.
+        """
+        q = question.strip().lower().strip(' ?.! ')
+
+        # 1. Preview rows (e.g. 'show me first 10 rows')
         m = re.fullmatch(r'(?:show (?:me )?)?(?:the )?(?:first|top) (\d+) rows?', q)
         if m:
             return f'SELECT * FROM orders LIMIT {min(int(m[1]), 10000)}'
-        if q in {'sample rows','preview rows','show me 10 rows'}:
+        if q in {'sample rows', 'preview rows', 'show me 10 rows'}:
             return 'SELECT * FROM orders LIMIT 10'
-        if q in {'total number of records','what is the total number of records','total number of rows','total count','how many rows','how many records','count of records','row count'}:
+
+        # 2. Total record count
+        if q in {'total number of records', 'what is the total number of records', 'total number of rows', 'total count', 'how many rows', 'how many records', 'count of records', 'row count'}:
             return 'SELECT COUNT(*) AS total_records FROM orders'
+
+        # 3. Simple condition count (e.g. 'how many rows have revenue > 100')
         m = re.fullmatch(r'how many (?:rows|records) (?:have|where) ([a-z_]+) (>=|<=|!=|=|>|<) (-?\d+(?:\.\d+)?)', q)
         if m:
-            col = next((c for c in df.columns if c.lower()==m[1]),None)
+            col = next((c for c in df.columns if c.lower() == m[1]), None)
             if col:
-                quoted = '"'+col.replace('"','""')+'"'
+                quoted = '"' + col.replace('"', '""') + '"'
                 return f'SELECT COUNT(*) AS total_records FROM orders WHERE {quoted} {m[2]} {float(m[3])}'
+
+        # 4. Group by aggregation (e.g. 'total revenue by category')
         def quote(name):
             return '"' + str(name).replace('"', '""') + '"'
+
         columns = {str(c).lower(): c for c in df.columns}
         revenue = next((columns[c] for c in ["revenue", "sales", "amount", "total"] if c in columns), None)
         qty = next((columns[c] for c in ["quantity", "qty"] if c in columns), None)
         price = next((columns[c] for c in ["unit_price", "price"] if c in columns), None)
         revenue_expr = quote(revenue) if revenue else (f"{quote(qty)} * {quote(price)}" if qty and price else None)
+
         group_match = re.search(r"\b(?:by|per|each)\s+(?:the\s+)?([a-z_]+)", q)
         group = None
         if group_match:
             word = group_match.group(1)
             group = columns.get(word) or columns.get(word.rstrip('s'))
+
         simple_total = re.fullmatch(r"(?:what (?:is|are) (?:the )?|show (?:me )?)?(?:total |sum of )?(?:revenue|sales|amount) (?:by|per|for each) (?:the )?[a-z_]+", q.strip(" ?.!"))
         if group and revenue_expr and simple_total:
             return f"SELECT {quote(group)}, SUM({revenue_expr}) AS total_revenue FROM orders GROUP BY {quote(group)} ORDER BY total_revenue DESC"
+
+        # 5. Top customers by orders
         customer = next((columns[c] for c in ["customer", "customer_name"] if c in columns), None)
         top_match = re.search(r"\btop\s+(\d+)\s+customers?", q)
         simple_top = re.fullmatch(r"(?:show (?:me )?)?top \d+ customers? by (?:order count|number of orders)", q.strip(" ?.!"))
         if customer and top_match and simple_top:
             limit = min(int(top_match.group(1)), 1000)
             return f"SELECT {quote(customer)}, COUNT(*) AS order_count FROM orders GROUP BY {quote(customer)} ORDER BY order_count DESC LIMIT {limit}"
+
         return None
 
     def _execute_sql(self, conn, sql):
+        """
+        In-Memory SQLite me query execute karta hai.
+        Safety features:
+        - PRAGMA query_only = ON (Disk write impossible)
+        - Custom Authorizer: Sirf 'orders' table read karne deta hai, load_extension block karta hai
+        - Progress Handler: 2-second timeout ke baad query kill ho jaati hai
+        - Row & Byte limits: Max 10,000 rows ya 5MB data
+        """
         import json
         import time
         self._truncated = False
+
+        # Pehle AST safety check karo
         safe, error = self._validate_sql_safety(sql)
         if not safe:
             return [], error
-        deadline = time.monotonic()+float(os.getenv('SQL_TIMEOUT_SECONDS','2'))
-        max_rows = int(os.getenv('SQL_MAX_ROWS','10000'))
-        max_bytes = int(os.getenv('SQL_MAX_BYTES', str(5*1024*1024)))
-        allowed = {sqlite3.SQLITE_SELECT,sqlite3.SQLITE_READ,sqlite3.SQLITE_FUNCTION,sqlite3.SQLITE_RECURSIVE}
+
+        deadline = time.monotonic() + float(os.getenv('SQL_TIMEOUT_SECONDS', '2'))
+        max_rows = int(os.getenv('SQL_MAX_ROWS', '10000'))
+        max_bytes = int(os.getenv('SQL_MAX_BYTES', str(5 * 1024 * 1024)))
+        allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
+
         def authorize(action, arg1, arg2, database, trigger):
             if action not in allowed:
                 return sqlite3.SQLITE_DENY
-            if action==sqlite3.SQLITE_READ and arg1!='orders':
+            if action == sqlite3.SQLITE_READ and arg1 != 'orders':
                 return sqlite3.SQLITE_DENY
-            if action==sqlite3.SQLITE_FUNCTION and str(arg2).lower() in {'load_extension','readfile','writefile'}:
+            if action == sqlite3.SQLITE_FUNCTION and str(arg2).lower() in {'load_extension', 'readfile', 'writefile'}:
                 return sqlite3.SQLITE_DENY
             return sqlite3.SQLITE_OK
+
         try:
             conn.execute('PRAGMA query_only=ON')
-            conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH,max(max_bytes,1024*1024))
-            conn.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH,100000)
+            conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, max(max_bytes, 1024 * 1024))
+            conn.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH, 100000)
             conn.set_authorizer(authorize)
-            conn.set_progress_handler(lambda: int(time.monotonic()>deadline),1000)
+            # 2 second timeout check
+            conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+
             cursor = conn.execute(sql)
             names = [d[0] for d in cursor.description]
             output, size = [], 2
@@ -157,9 +204,9 @@ class SQLAgent:
                 row = cursor.fetchone()
                 if row is None:
                     break
-                record = dict(zip(names,row))
-                size += len(json.dumps(record,ensure_ascii=False,allow_nan=False).encode('utf-8'))+2
-                if len(output)>=max_rows or size>max_bytes:
+                record = dict(zip(names, row))
+                size += len(json.dumps(record, ensure_ascii=False, allow_nan=False).encode('utf-8')) + 2
+                if len(output) >= max_rows or size > max_bytes:
                     self._truncated = True
                     break
                 output.append(record)
@@ -168,71 +215,81 @@ class SQLAgent:
             return [], 'SQL execution rejected, exceeded its budget, or failed.'
         finally:
             conn.set_authorizer(None)
-            conn.set_progress_handler(None,0)
+            conn.set_progress_handler(None, 0)
 
     def generate_and_run(self, question, df, quality_report=None):
-        from agents.validation import eligible_subset,numeric_columns
+        """
+        Main function:
+        1. DataFrame ko in-memory SQLite table 'orders' me daalta hai.
+        2. Natural language question ke liye SQL generate karta hai (Deterministic ya LLM).
+        3. Query run karta hai. Agar error aaye, to auto self-correction retry karta hai.
+        """
+        from agents.validation import eligible_subset, numeric_columns
         population = eligible_subset(df)[1] if df is not None else {}
-        result = {'question':question,'generated_sql':'','result':[],'row_count':0,'error':None,'truncated':False,'population':population}
+        result = {
+            'question': question,
+            'generated_sql': '',
+            'result': [],
+            'row_count': 0,
+            'error': None,
+            'truncated': False,
+            'population': population
+        }
+
         if df is None or df.empty or not question.strip():
-            return dict(result,error='A nonempty question and dataset are required.')
+            return dict(result, error='A nonempty question and dataset are required.')
+
         with sqlite3.connect(':memory:') as conn:
-            # SQL sees all source rows. Numeric conversion failures are SQL NULL, not deleted rows.
+            # SQL me saari rows visible hoti hain; invalid conversion rows NULL dikhti hain
             sql_frame = df.copy()
             column_populations = {}
             for col in numeric_columns(df):
-                eligible,column_populations[col] = eligible_subset(df,[col])
+                eligible, column_populations[col] = eligible_subset(df, [col])
                 source = set(eligible.attrs['source_rows'])
-                sql_frame[col] = pd.to_numeric(sql_frame[col],errors='coerce').where([r in source for r in df.attrs.get('source_rows',range(2,len(df)+2))])
+                sql_frame[col] = pd.to_numeric(sql_frame[col], errors='coerce').where(
+                    [r in source for r in df.attrs.get('source_rows', range(2, len(df) + 2))]
+                )
             result['column_populations'] = column_populations
-            sql_frame.to_sql('orders',conn,index=False)
+            sql_frame.to_sql('orders', conn, index=False)
+
             schema = self._extract_schema(df)
             system = 'Generate one read-only SQLite SELECT query against orders. Output SQL only. Use the provided column names exactly.'
             prompt = f'Schema:\n{schema}\nQuestion: {question}'
-            sql = self._match_deterministic_query(question,df)
+
+            # Pehle fast regex match try karo
+            sql = self._match_deterministic_query(question, df)
+
+            # Max 2 attempts: pehla normal, doosra self-correction retry agar query fail ho
             for attempt in range(2):
                 if not sql:
                     try:
-                        sql = self._clean_sql(self._call_llm(prompt,system))
+                        sql = self._clean_sql(self._call_llm(prompt, system))
                     except Exception:
-                        return dict(result,error='Language provider unavailable for this question.')
-                rows,error = self._execute_sql(conn,sql)
+                        return dict(result, error='Language provider unavailable for this question.')
+
+                rows, error = self._execute_sql(conn, sql)
+                # Success: valid rows return karo
                 if error is None:
-                    return dict(result,generated_sql=sql,result=rows,row_count=len(rows),truncated=self._truncated,error=None)
-                result.update(generated_sql=sql,error=error)
-                prompt = f'{prompt}\nCorrect this failed query: {sql}\nOnly return a read-only SELECT.'
+                    return dict(result, generated_sql=sql, result=rows, row_count=len(rows), truncated=self._truncated, error=None)
+
+                # Retry setup: Error LLM ko feed karke correction maangte hain
+                result.update(generated_sql=sql, error=error)
+                prompt = f'{prompt}\nCorrect this failed query: {sql}\nError was: {error}\nOnly return a read-only SELECT.'
                 sql = None
+
             return result
 
     def get_default_fallback_questions(self) -> List[Dict[str, str]]:
-        """Returns generic, schema-agnostic business questions when no dataset is loaded
-        or when schema-specific generation cannot be performed.
-        """
+        """Starter questions jab koi dataset loaded na ho ya questions generate na ho sakein."""
         return [
-            {
-                "title": "Show me the first 10 rows",
-                "description": "Displays the initial sample of rows from the active table",
-                "icon": "📋",
-            },
-            {
-                "title": "What is the total number of records?",
-                "description": "Counts the total rows loaded in the current dataset",
-                "icon": "🔢",
-            },
-            {
-                "title": "What are the column summary statistics?",
-                "description": "Computes aggregate ranges and distribution metrics",
-                "icon": "📊",
-            },
-            {
-                "title": "Find any records with missing or empty values",
-                "description": "Scans columns for null or unpopulated entries",
-                "icon": "🔍",
-            },
+            {"title": "Show me the first 10 rows", "description": "Displays the initial sample of rows from the active table", "icon": "📋"},
+            {"title": "What is the total number of records?", "description": "Counts the total rows loaded in the current dataset", "icon": "🔢"},
+            {"title": "What are the column summary statistics?", "description": "Computes aggregate ranges and distribution metrics", "icon": "📊"},
+            {"title": "Find any records with missing or empty values", "description": "Scans columns for null or unpopulated entries", "icon": "🔍"},
         ]
 
     def _generate_deterministic_questions(self, df: pd.DataFrame) -> List[Dict[str, str]]:
-        """Generates 3-4 schema-grounded fallback questions based on actual column inspection."""
+        """Dataset ke columns inspect karke 3-4 tailored starter questions banata hai."""
         if df is None or df.empty:
             return self.get_default_fallback_questions()
 
@@ -243,10 +300,9 @@ class SQLAgent:
 
         questions = []
 
-        # Case 1: Temporal + Metric
+        # 1. Date + Numeric Column (e.g. Total quantity by order_date)
         if date_cols and numeric_cols:
-            d_col = date_cols[0]
-            m_col = numeric_cols[0]
+            d_col, m_col = date_cols[0], numeric_cols[0]
             questions.append({
                 "title": f"Total {m_col} by {d_col}",
                 "description": f"Aggregates {m_col.lower()} performance over {d_col.lower()} periods",
@@ -266,10 +322,9 @@ class SQLAgent:
                     "icon": "🏆",
                 })
 
-        # Case 2: Categorical + Metric
+        # 2. Categorical + Numeric Column (e.g. Average quantity grouped by category)
         if cat_cols and numeric_cols:
-            c_col = cat_cols[0]
-            m_col = numeric_cols[0]
+            c_col, m_col = cat_cols[0], numeric_cols[0]
             questions.append({
                 "title": f"Average {m_col} grouped by {c_col}",
                 "description": f"Breaks down average {m_col.lower()} across different {c_col.lower()} categories",
@@ -281,24 +336,7 @@ class SQLAgent:
                 "icon": "🥇",
             })
 
-        # Case 3: Multiple metrics without categorical
-        if not cat_cols and len(numeric_cols) >= 2 and len(questions) < 3:
-            m1, m2 = numeric_cols[0], numeric_cols[1]
-            questions.append({
-                "title": f"Average and maximum of {m1} and {m2}",
-                "description": f"Summary statistics for key metrics {m1} and {m2}",
-                "icon": "📈",
-            })
-
-        # Pad to 4 questions if needed
-        if len(questions) < 4 and numeric_cols:
-            m_col = numeric_cols[0]
-            questions.append({
-                "title": f"Distribution and range of {m_col}",
-                "description": f"Minimum, average, and maximum {m_col.lower()} across all rows",
-                "icon": "📐",
-            })
-
+        # Fallback padding to 4 questions
         if len(questions) < 4:
             for q in self.get_default_fallback_questions():
                 if len(questions) >= 4:
@@ -311,13 +349,13 @@ class SQLAgent:
     def generate_suggested_questions(
         self, df: pd.DataFrame, quality_report: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, str]]:
-        """Dynamically generates 3-4 schema-relevant business questions based on
-        the actual column names, types, and samples of the provided dataset using the LLM.
+        """
+        LLM use karke dataset ke actual schema par based smart business questions suggest karta hai.
+        Agar LLM fail ho jaye, to deterministic fallback use karta hai.
         """
         if df is None or df.empty:
             return self.get_default_fallback_questions()
 
-        # Build clean schema summary
         col_summaries = []
         for c in df.columns:
             dtype_str = str(df[c].dtype)
@@ -332,48 +370,29 @@ class SQLAgent:
             "generate 3 to 4 natural, insightful, executive-level business questions that a manager "
             "would ask about this data.\n\n"
             "STRICT RULES:\n"
-            "1. You MUST ONLY reference columns that ACTUALLY exist in the provided schema. NEVER invent or assume columns like 'region', 'product', 'customer', or 'revenue' unless they are explicitly in the schema.\n"
-            "2. Each question must be answerable using a single SQLite query against the table 'data' (or 'orders').\n"
-            "3. Make questions diverse: e.g. temporal trends, rankings, aggregations, ratios/differences, or averages.\n"
-            "4. Return ONLY a strict JSON array of 3 to 4 objects. Each object MUST have:\n"
-            "   - 'title': The concise natural-language business question (e.g., 'What is the total Revenue by Month?')\n"
-            "   - 'description': A 1-sentence explanation of what the question reveals.\n"
-            "   - 'icon': A single relevant emoji representing the query (e.g. 📈, 💰, 📊, 👥, 🏆, 📦)."
+            "1. You MUST ONLY reference columns that ACTUALLY exist in the provided schema.\n"
+            "2. Each question must be answerable using a single SQLite query against table 'orders'.\n"
+            "3. Return ONLY a strict JSON array of objects with keys 'title', 'description', 'icon'."
         )
 
-        user_prompt = (
-            f"Here is the schema and sample data for the currently loaded table:\n\n"
-            f"{schema_text}\n\n"
-            f"Generate 3 to 4 tailored business questions now. Return strictly a JSON array."
-        )
+        user_prompt = f"Schema:\n{schema_text}\n\nGenerate 3 to 4 tailored business questions. Return strictly JSON array."
 
         try:
             raw_resp = self._call_llm(user_prompt, system_prompt)
             raw_resp = re.sub(r"<think>[\s\S]*?</think>", "", raw_resp, flags=re.IGNORECASE).strip()
-            cleaned_resp = raw_resp.strip()
-            arr_match = re.search(r"\[\s*\{.*\}\s*\]", cleaned_resp, re.DOTALL)
+            arr_match = re.search(r"\[\s*\{.*\}\s*\]", raw_resp, re.DOTALL)
             if arr_match:
-                cleaned_resp = arr_match.group(0)
-
-            import json
-            parsed = json.loads(cleaned_resp)
-            if isinstance(parsed, list) and len(parsed) >= 2:
-                valid_questions = []
-                for item in parsed:
-                    if isinstance(item, dict) and item.get("title") and item.get("description"):
-                        title = str(item["title"]).strip()
-                        desc = str(item["description"]).strip()
-                        icon = str(item.get("icon", "📊")).strip()
-                        valid_questions.append({
-                            "title": title,
-                            "description": desc,
-                            "icon": icon or "📊",
-                        })
-                if len(valid_questions) >= 3:
-                    return valid_questions[:4]
+                import json
+                parsed = json.loads(arr_match.group(0))
+                if isinstance(parsed, list) and len(parsed) >= 2:
+                    valid = [
+                        {"title": str(item["title"]).strip(), "description": str(item["description"]).strip(), "icon": str(item.get("icon", "📊")).strip()}
+                        for item in parsed
+                        if isinstance(item, dict) and item.get("title") and item.get("description")
+                    ]
+                    if len(valid) >= 3:
+                        return valid[:4]
         except Exception:
             pass
 
-        # Fall back to schema-grounded deterministic questions
         return self._generate_deterministic_questions(df)
-
