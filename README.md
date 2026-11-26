@@ -4,6 +4,28 @@ AgentInsight AI is an autonomous, full-stack multi-agent platform designed to tr
 
 ---
 
+## Screenshots
+
+### Landing Page
+![Landing Page](docs/screenshots/landing-page.png)
+
+### Data Quality and Audit Trail
+![Data Quality and Audit Trail](docs/screenshots/data-quality.png)
+
+### Exploratory Data Analysis (EDA)
+![Exploratory Data Analysis](docs/screenshots/eda-dashboard.png)
+
+### Machine Learning Insights and Anomaly Detection
+![Machine Learning Insights](docs/screenshots/ml-insights.png)
+
+### Executive Business Summary and Charts
+![Business Insights](docs/screenshots/business-insights.png)
+
+### Natural-Language SQL and RAG Assistant
+![SQL and RAG Assistant](docs/screenshots/sql-rag-assistant.png)
+
+---
+
 ## Architecture Overview
 
 The platform uses a modular multi-agent architecture where each agent executes bounded responsibilities with strict validation and audit tracking guarantees:
