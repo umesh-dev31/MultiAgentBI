@@ -7,7 +7,7 @@ AgentInsight AI is an autonomous, full-stack multi-agent platform designed to tr
 ## Screenshots
 
 ### Landing Page
-![Landing Page](docs/screenshots/landing-page.jpg)
+![Landing Page](docs/screenshots/landing-page.png)
 
 ### Data Quality and Audit Trail
 ![Data Quality and Audit Trail](docs/screenshots/data-quality.png)
