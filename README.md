@@ -15,9 +15,6 @@ AgentInsight AI is an autonomous, full-stack multi-agent platform designed to tr
 ### Exploratory Data Analysis (EDA)
 ![Exploratory Data Analysis](docs/screenshots/eda-dashboard.png)
 
-### Machine Learning Insights and Anomaly Detection
-![Machine Learning Insights](docs/screenshots/ml-insights.png)
-
 ### Executive Business Summary and Charts
 ![Business Insights](docs/screenshots/business-insights.png)
 
